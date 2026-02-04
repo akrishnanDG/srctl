@@ -1,0 +1,11 @@
+{
+  "type": "record",
+  "name": "Order",
+  "namespace": "com.example",
+  "fields": [
+    {"name": "orderId", "type": "string"},
+    {"name": "customer", "type": "com.example.Person"},
+    {"name": "shippingAddress", "type": "com.example.Address"},
+    {"name": "total", "type": "double"}
+  ]
+}

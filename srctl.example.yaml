@@ -1,0 +1,44 @@
+# srctl configuration file
+# Copy this file to ~/.srctl/srctl.yaml or ./srctl.yaml and fill in your credentials
+
+# Schema Registry connections
+registries:
+  # Confluent Cloud Schema Registry
+  - name: confluent-cloud
+    url: https://psrc-xxxxx.us-east-2.aws.confluent.cloud
+    username: YOUR_API_KEY
+    password: YOUR_API_SECRET
+    default: true
+    # Get your API key from Confluent Cloud Console:
+    # https://confluent.cloud > Environment > Schema Registry > API credentials
+
+  # Local development (Confluent Platform or community)
+  - name: local
+    url: http://localhost:8081
+
+  # Development environment
+  - name: dev
+    url: https://dev-schema-registry.example.com
+    username: dev-api-key
+    password: dev-api-secret
+    context: .dev
+
+  # Staging environment
+  - name: staging
+    url: https://staging-schema-registry.example.com
+    username: staging-api-key
+    password: staging-api-secret
+    context: .staging
+
+  # Production environment
+  - name: prod
+    url: https://prod-schema-registry.example.com
+    username: prod-api-key
+    password: prod-api-secret
+    context: .production
+
+# Default output format: table, json, yaml, plain
+default_output: table
+
+# Default context (empty for default context ".")
+default_context: ""
