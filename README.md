@@ -30,11 +30,6 @@ A powerful CLI tool for Confluent Schema Registry that provides advanced capabil
 - **compare** - Compare schemas across registries with multi-threading
 - **clone** - Clone schemas between registries (preserves schema IDs by default)
 
-### Schema Splitting
-- **split analyze** - Analyze a schema and show extractable types, sizes, and dependency tree
-- **split extract** - Split a schema into referenced sub-schemas and write to files
-- **split register** - Split a schema and register all parts to Schema Registry in dependency order
-
 ### Data Contracts
 - **contract** - Manage data contract rules (get, set, validate)
 
