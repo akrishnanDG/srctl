@@ -12,6 +12,13 @@ A powerful CLI tool for Confluent Schema Registry that provides advanced capabil
 - **delete** - Advanced delete with referential integrity checks
 - **diff** - Compare schemas between versions, subjects, or registries
 - **evolve** - Analyze schema evolution history with breaking change detection
+- **validate** - Validate schema syntax and compatibility offline (no registry needed)
+- **search** - Search schemas by field name, type, tag, or content across the registry
+
+### Schema Splitting
+- **split analyze** - Analyze a schema and show extractable types, sizes, and dependency tree
+- **split extract** - Split a schema into referenced sub-schemas and write to files
+- **split register** - Split a schema and register all parts to Schema Registry in dependency order
 
 ### Bulk & Backup Operations
 - **export** - Export to tar.gz or zip with dependencies (multi-threaded)
