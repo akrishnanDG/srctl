@@ -45,7 +45,7 @@ A powerful CLI tool for Confluent Schema Registry that provides advanced capabil
 
 ### From Releases (Recommended)
 
-Download the latest binary for your platform from [GitHub Releases](https://github.com/srctl/srctl/releases):
+Generate the binary based on your platform:
 
 ```bash
 # macOS (Apple Silicon)
