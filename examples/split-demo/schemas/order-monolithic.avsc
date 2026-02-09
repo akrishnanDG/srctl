@@ -1,0 +1,90 @@
+{
+  "type": "record",
+  "name": "Order",
+  "namespace": "com.example.events",
+  "doc": "A monolithic order schema with inline nested types. This demonstrates a schema that could grow large enough to exceed the 1MB Schema Registry limit.",
+  "fields": [
+    {"name": "orderId", "type": "string", "doc": "Unique order identifier"},
+    {"name": "orderDate", "type": "string", "doc": "ISO 8601 date of the order"},
+    {"name": "status", "type": {
+      "type": "enum",
+      "name": "OrderStatus",
+      "namespace": "com.example.types",
+      "symbols": ["PENDING", "CONFIRMED", "SHIPPED", "DELIVERED", "CANCELLED"],
+      "doc": "Order lifecycle status"
+    }},
+    {"name": "customer", "type": {
+      "type": "record",
+      "name": "Customer",
+      "namespace": "com.example.types",
+      "doc": "Customer information",
+      "fields": [
+        {"name": "customerId", "type": "string"},
+        {"name": "firstName", "type": "string"},
+        {"name": "lastName", "type": "string"},
+        {"name": "email", "type": "string"},
+        {"name": "phone", "type": ["null", "string"], "default": null},
+        {"name": "billingAddress", "type": {
+          "type": "record",
+          "name": "Address",
+          "namespace": "com.example.types",
+          "doc": "Physical address",
+          "fields": [
+            {"name": "street", "type": "string"},
+            {"name": "street2", "type": ["null", "string"], "default": null},
+            {"name": "city", "type": "string"},
+            {"name": "state", "type": "string"},
+            {"name": "zip", "type": "string"},
+            {"name": "country", "type": "string", "default": "US"}
+          ]
+        }},
+        {"name": "shippingAddress", "type": ["null", "com.example.types.Address"], "default": null}
+      ]
+    }},
+    {"name": "items", "type": {
+      "type": "array",
+      "items": {
+        "type": "record",
+        "name": "LineItem",
+        "namespace": "com.example.types",
+        "doc": "An individual item in the order",
+        "fields": [
+          {"name": "productId", "type": "string"},
+          {"name": "productName", "type": "string"},
+          {"name": "quantity", "type": "int"},
+          {"name": "unitPrice", "type": {
+            "type": "record",
+            "name": "Money",
+            "namespace": "com.example.types",
+            "doc": "Monetary amount with currency",
+            "fields": [
+              {"name": "amount", "type": "double"},
+              {"name": "currency", "type": "string", "default": "USD"}
+            ]
+          }},
+          {"name": "discount", "type": ["null", "com.example.types.Money"], "default": null}
+        ]
+      }
+    }},
+    {"name": "subtotal", "type": "com.example.types.Money"},
+    {"name": "tax", "type": "com.example.types.Money"},
+    {"name": "total", "type": "com.example.types.Money"},
+    {"name": "payment", "type": {
+      "type": "record",
+      "name": "Payment",
+      "namespace": "com.example.types",
+      "doc": "Payment information",
+      "fields": [
+        {"name": "method", "type": {
+          "type": "enum",
+          "name": "PaymentMethod",
+          "namespace": "com.example.types",
+          "symbols": ["CREDIT_CARD", "DEBIT_CARD", "PAYPAL", "BANK_TRANSFER", "CRYPTO"]
+        }},
+        {"name": "transactionId", "type": ["null", "string"], "default": null},
+        {"name": "amount", "type": "com.example.types.Money"}
+      ]
+    }},
+    {"name": "notes", "type": ["null", "string"], "default": null}
+  ]
+}

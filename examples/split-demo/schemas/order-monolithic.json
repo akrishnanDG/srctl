@@ -1,0 +1,82 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "order.json",
+  "type": "object",
+  "description": "A monolithic order schema with nested object types",
+  "properties": {
+    "orderId": {"type": "string", "description": "Unique order identifier"},
+    "orderDate": {"type": "string", "format": "date-time"},
+    "status": {
+      "type": "string",
+      "enum": ["PENDING", "CONFIRMED", "SHIPPED", "DELIVERED", "CANCELLED"]
+    },
+    "customer": {
+      "type": "object",
+      "description": "Customer information",
+      "properties": {
+        "customerId": {"type": "string"},
+        "firstName": {"type": "string"},
+        "lastName": {"type": "string"},
+        "email": {"type": "string", "format": "email"},
+        "phone": {"type": "string"},
+        "billingAddress": {
+          "type": "object",
+          "description": "Physical address",
+          "properties": {
+            "street": {"type": "string"},
+            "street2": {"type": "string"},
+            "city": {"type": "string"},
+            "state": {"type": "string"},
+            "zip": {"type": "string"},
+            "country": {"type": "string", "default": "US"}
+          },
+          "required": ["street", "city", "state", "zip", "country"]
+        },
+        "shippingAddress": {
+          "type": "object",
+          "description": "Physical address",
+          "properties": {
+            "street": {"type": "string"},
+            "street2": {"type": "string"},
+            "city": {"type": "string"},
+            "state": {"type": "string"},
+            "zip": {"type": "string"},
+            "country": {"type": "string", "default": "US"}
+          },
+          "required": ["street", "city", "state", "zip", "country"]
+        }
+      },
+      "required": ["customerId", "firstName", "lastName", "email"]
+    },
+    "items": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "description": "An individual item in the order",
+        "properties": {
+          "productId": {"type": "string"},
+          "productName": {"type": "string"},
+          "quantity": {"type": "integer", "minimum": 1},
+          "unitPrice": {
+            "type": "object",
+            "properties": {
+              "amount": {"type": "number"},
+              "currency": {"type": "string", "default": "USD"}
+            },
+            "required": ["amount", "currency"]
+          }
+        },
+        "required": ["productId", "productName", "quantity", "unitPrice"]
+      }
+    },
+    "total": {
+      "type": "object",
+      "properties": {
+        "amount": {"type": "number"},
+        "currency": {"type": "string", "default": "USD"}
+      },
+      "required": ["amount", "currency"]
+    }
+  },
+  "required": ["orderId", "orderDate", "status", "customer", "items", "total"]
+}

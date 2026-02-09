@@ -1,0 +1,71 @@
+syntax = "proto3";
+package com.example.events;
+
+message Order {
+  string order_id = 1;
+  string order_date = 2;
+  OrderStatus status = 3;
+  Customer customer = 4;
+  repeated LineItem items = 5;
+  Money subtotal = 6;
+  Money tax = 7;
+  Money total = 8;
+  Payment payment = 9;
+  string notes = 10;
+}
+
+enum OrderStatus {
+  ORDER_STATUS_UNSPECIFIED = 0;
+  PENDING = 1;
+  CONFIRMED = 2;
+  SHIPPED = 3;
+  DELIVERED = 4;
+  CANCELLED = 5;
+}
+
+message Customer {
+  string customer_id = 1;
+  string first_name = 2;
+  string last_name = 3;
+  string email = 4;
+  string phone = 5;
+  Address billing_address = 6;
+  Address shipping_address = 7;
+}
+
+message Address {
+  string street = 1;
+  string street2 = 2;
+  string city = 3;
+  string state = 4;
+  string zip = 5;
+  string country = 6;
+}
+
+message LineItem {
+  string product_id = 1;
+  string product_name = 2;
+  int32 quantity = 3;
+  Money unit_price = 4;
+  Money discount = 5;
+}
+
+message Money {
+  double amount = 1;
+  string currency = 2;
+}
+
+message Payment {
+  PaymentMethod method = 1;
+  string transaction_id = 2;
+  Money amount = 3;
+}
+
+enum PaymentMethod {
+  PAYMENT_METHOD_UNSPECIFIED = 0;
+  CREDIT_CARD = 1;
+  DEBIT_CARD = 2;
+  PAYPAL = 3;
+  BANK_TRANSFER = 4;
+  CRYPTO = 5;
+}
