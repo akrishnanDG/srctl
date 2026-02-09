@@ -23,6 +23,11 @@ A powerful CLI tool for Confluent Schema Registry that provides advanced capabil
 - **compare** - Compare schemas across registries with multi-threading
 - **clone** - Clone schemas between registries (preserves schema IDs by default)
 
+### Schema Splitting
+- **split analyze** - Analyze a schema and show extractable types, sizes, and dependency tree
+- **split extract** - Split a schema into referenced sub-schemas and write to files
+- **split register** - Split a schema and register all parts to Schema Registry in dependency order
+
 ### Data Contracts
 - **contract** - Manage data contract rules (get, set, validate)
 
@@ -354,6 +359,35 @@ srctl stats --workers 100
 
 # JSON output
 srctl stats -o json
+```
+
+### Schema Splitting
+
+Split large schemas that exceed the 1MB Schema Registry limit into referenced sub-schemas. Supports Avro, Protobuf, and JSON Schema.
+
+For a comprehensive guide, see [docs/schema-splitting-guide.md](docs/schema-splitting-guide.md).
+
+```bash
+# Analyze a schema to see what can be extracted
+srctl split analyze --file order.avsc
+
+# Analyze with minimum size threshold
+srctl split analyze --file order.avsc --min-size 10240
+
+# Extract sub-schemas to a directory for review
+srctl split extract --file order.avsc --output-dir ./split-schemas/
+
+# Split and register directly to Schema Registry (in dependency order)
+srctl split register --file order.avsc --subject orders-value
+
+# Dry run -- see what would be registered without making changes
+srctl split register --file order.avsc --subject orders-value --dry-run
+
+# Split a Protobuf schema
+srctl split register --file order.proto --type PROTOBUF --subject orders-value
+
+# Split a JSON Schema
+srctl split register --file order.json --type JSON --subject orders-value
 ```
 
 ### Data Contracts
