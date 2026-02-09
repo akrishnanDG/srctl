@@ -43,27 +43,6 @@ A powerful CLI tool for Confluent Schema Registry that provides advanced capabil
 
 ## Installation
 
-### From Releases (Recommended)
-
-Generate the binary based on your platform:
-
-```bash
-# macOS (Apple Silicon)
-curl -LO https://github.com/srctl/srctl/releases/latest/download/srctl-darwin-arm64
-chmod +x srctl-darwin-arm64
-sudo mv srctl-darwin-arm64 /usr/local/bin/srctl
-
-# macOS (Intel)
-curl -LO https://github.com/srctl/srctl/releases/latest/download/srctl-darwin-amd64
-chmod +x srctl-darwin-amd64
-sudo mv srctl-darwin-amd64 /usr/local/bin/srctl
-
-# Linux (amd64)
-curl -LO https://github.com/srctl/srctl/releases/latest/download/srctl-linux-amd64
-chmod +x srctl-linux-amd64
-sudo mv srctl-linux-amd64 /usr/local/bin/srctl
-```
-
 ### From Source
 
 ```bash
