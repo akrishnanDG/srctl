@@ -1,6 +1,6 @@
 # srctl - Schema Registry Control CLI
 
-A powerful CLI tool for Confluent Schema Registry that provides advanced capabilities beyond the standard SR CLI, including multi-threaded operations, referential integrity checks, and cross-registry operations.
+A powerful CLI tool for Confluent Schema Registry that provides advanced capabilities beyond the standard SR CLI, including multi-threaded operations, referential integrity checks, cross-registry operations, and AI-agent-ready commands.
 
 ## Features
 
@@ -19,6 +19,11 @@ A powerful CLI tool for Confluent Schema Registry that provides advanced capabil
 - **split analyze** - Analyze a schema and show extractable types, sizes, and dependency tree
 - **split extract** - Split a schema into referenced sub-schemas and write to files
 - **split register** - Split a schema and register all parts to Schema Registry in dependency order
+
+### AI-Agent-Ready Commands
+- **explain** - Describe a schema in human-readable terms (fields, types, docs, references)
+- **suggest** - Propose compatible schema changes from a natural language description
+- **generate** - Infer a schema (Avro/Protobuf/JSON) from sample JSON data
 
 ### Bulk & Backup Operations
 - **export** - Export to tar.gz or zip with dependencies (multi-threaded)
@@ -371,6 +376,141 @@ srctl split register --file order.proto --type PROTOBUF --subject orders-value
 srctl split register --file order.json --type JSON --subject orders-value
 ```
 
+### Schema Validation
+
+Validate schemas offline without requiring a running Schema Registry. Supports syntax checks, compatibility analysis between local files, and directory validation.
+
+```bash
+# Validate syntax of a schema file
+srctl validate --file order.avsc
+
+# Validate a Protobuf schema
+srctl validate --file order.proto --type PROTOBUF
+
+# Check compatibility between two local files
+srctl validate --file order-v2.avsc --against order-v1.avsc
+
+# Check with specific compatibility mode (BACKWARD, FORWARD, FULL)
+srctl validate --file order-v2.avsc --against order-v1.avsc --compatibility FULL
+
+# Validate all schemas in a directory
+srctl validate --dir ./schemas/
+
+# Check compatibility against latest version in registry
+srctl validate --file order-v2.avsc --subject orders-value
+```
+
+Compatibility issues include actionable fix suggestions:
+```
+ERROR [name]: Field 'name' was removed
+  Fix: Keep the field 'name', or change compatibility to NONE
+WARN [email]: New field 'email' has no default value
+  Fix: Add a default value or make 'email' nullable: ["null", "string"]
+```
+
+### Schema Search
+
+Search across all schemas in the registry by field name, type, tag, or content. Uses multi-threaded fetching for large registries.
+
+```bash
+# Find all schemas with an 'email' field
+srctl search --field email
+
+# Find fields matching a glob pattern
+srctl search --field "address*"
+
+# Find fields of a specific type
+srctl search --field email --field-type string
+
+# Full-text search in schema content
+srctl search --text customerId
+
+# Search for tagged schemas (PII, SENSITIVE, etc.)
+srctl search --tag PII
+
+# Only search latest versions (default)
+srctl search --field email --version latest
+
+# Search all versions
+srctl search --field email --version all
+
+# Filter by subject name pattern
+srctl search --field email --filter "order-*"
+
+# Use more workers for large registries
+srctl search --field email --workers 50
+
+# Output as JSON for scripting
+srctl search --field email -o json
+```
+
+### Schema Explanation
+
+Describe schemas in human-readable terms. Useful for understanding unfamiliar schemas or for AI coding agents that need schema context before writing producer/consumer code.
+
+```bash
+# Explain a schema from the registry (includes referenced schema fields)
+srctl explain orders-value
+
+# Explain a specific version
+srctl explain orders-value --version 2
+
+# Explain a local file (no registry needed)
+srctl explain --file order.avsc
+
+# JSON output for programmatic consumption
+srctl explain orders-value -o json
+```
+
+Output includes field names, types, documentation, nullability, defaults, and recursively resolved reference fields.
+
+### Schema Suggestions
+
+Propose compatible schema changes from a natural language description. Knows Avro compatibility rules and type promotion (int->long, float->double, string<->bytes).
+
+```bash
+# Suggest adding a field
+srctl suggest orders-value "add discount code"
+
+# Against a local file
+srctl suggest --file order.avsc "add shipping address"
+
+# Warns about breaking changes with alternatives
+srctl suggest orders-value "remove the notes field"
+
+# Handles renames (warns, suggests add+deprecate pattern)
+srctl suggest --file order.avsc "rename email to emailAddress"
+
+# Type changes (knows promotion rules)
+srctl suggest orders-value "change type of count to long"
+```
+
+For breaking changes, explains why it breaks and suggests safe alternatives.
+
+### Schema Generation
+
+Infer schemas from sample JSON data. Detects common string formats (ISO dates, UUIDs, emails) and annotates them.
+
+```bash
+# Generate Avro schema from JSON (pipe from stdin)
+echo '{"orderId": "123", "amount": 49.99, "active": true}' | srctl generate
+
+# Generate with custom name and namespace
+echo '{"id": "1", "name": "test"}' | srctl generate --name Order --namespace com.example
+
+# Generate Protobuf
+echo '{"id": "1", "count": 5}' | srctl generate --type PROTOBUF
+
+# Generate JSON Schema
+echo '{"id": "1", "amount": 9.99}' | srctl generate --type JSON
+
+# From a file
+srctl generate --from sample.json --name Event
+
+# Multiple samples (JSONL) for better type inference
+cat samples.jsonl | srctl generate --name Event
+```
+
 ### Data Contracts
 
 ```bash
@@ -492,6 +632,46 @@ srctl register user-events --file schema.avsc --context .mycontext
 
 - Schema IDs are preserved by default to maintain referential integrity
 - Use `--no-preserve-ids` only when you explicitly want new IDs assigned
+
+## AI Agent Integration
+
+srctl is designed to be usable by AI coding agents (Claude Code, Cursor, Copilot, etc.) out of the box. Every command supports `-o json` for structured, parseable output.
+
+### How AI Agents Use srctl
+
+**Before writing producer/consumer code**, an agent can understand the schema:
+```bash
+srctl explain orders-value -o json    # Get full schema description with field types
+srctl search --field email -o json    # Find which schemas have an email field
+```
+
+**Before proposing schema changes**, an agent can check compatibility:
+```bash
+srctl validate --file new-schema.avsc --against old-schema.avsc  # Offline check
+srctl suggest --file schema.avsc "add tracking number" -o json   # Get safe change proposal
+```
+
+**When bootstrapping a new service**, an agent can generate schemas from sample data:
+```bash
+echo '{"orderId": "123", "amount": 49.99}' | srctl generate --name Order -o json
+```
+
+**When debugging**, an agent can search and inspect:
+```bash
+srctl search --field customerId -o json     # Find all schemas using this field
+srctl diff orders-value@1 orders-value@2    # See what changed between versions
+srctl dangling -o json                      # Find broken references
+```
+
+### Key Properties for Agent Use
+
+| Property | Detail |
+|----------|--------|
+| **Structured output** | Every command supports `-o json` and `-o yaml` |
+| **Offline capable** | `validate`, `explain --file`, `suggest --file`, `generate` work without a registry |
+| **Deterministic** | No LLM inside — all commands produce consistent, reproducible output |
+| **Exit codes** | 0 = success, non-zero = error — agents can check `$?` |
+| **Actionable errors** | Validation and compatibility errors include fix suggestions |
 
 ## Global Flags
 
