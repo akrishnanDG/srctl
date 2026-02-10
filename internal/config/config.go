@@ -59,12 +59,13 @@ func LoadConfig() error {
 		})
 	}
 
-	// Read config file if exists
+	// Read config file if exists (silently ignore if not found)
 	if err := viper.ReadInConfig(); err != nil {
-		if _, ok := err.(viper.ConfigFileNotFoundError); !ok {
-			return fmt.Errorf("error reading config file: %w", err)
+		if _, ok := err.(viper.ConfigFileNotFoundError); ok {
+			// Config file not found is normal, use defaults/env
+			return nil
 		}
-		// Config file not found is okay, use defaults/env
+		return fmt.Errorf("error reading config file: %w", err)
 	}
 
 	// Unmarshal to struct

@@ -65,6 +65,7 @@ func init() {
 
 func initConfig() {
 	if err := config.LoadConfig(); err != nil {
+		// Only warn for actual config errors, not missing config files
 		fmt.Fprintf(os.Stderr, "Warning: %v\n", err)
 	}
 }

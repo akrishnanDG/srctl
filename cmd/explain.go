@@ -80,9 +80,10 @@ type FieldExplanation struct {
 
 // RefExplanation describes a schema reference
 type RefExplanation struct {
-	Name    string `json:"name"`
-	Subject string `json:"subject"`
-	Version int    `json:"version"`
+	Name    string             `json:"name"`
+	Subject string             `json:"subject"`
+	Version int                `json:"version"`
+	Fields  []FieldExplanation `json:"fields,omitempty"` // Resolved fields from referenced schema
 }
 
 func runExplain(cmd *cobra.Command, args []string) error {
@@ -123,11 +124,28 @@ func runExplain(cmd *cobra.Command, args []string) error {
 		explanation.Size = len(schema.Schema)
 
 		for _, ref := range schema.References {
-			explanation.References = append(explanation.References, RefExplanation{
+			refExp := RefExplanation{
 				Name:    ref.Name,
 				Subject: ref.Subject,
 				Version: ref.Version,
-			})
+			}
+			// Fetch and explain referenced schema
+			refSchema, err := c.GetSchema(ref.Subject, fmt.Sprintf("%d", ref.Version))
+			if err == nil {
+				var refExplanation SchemaExplanation
+				refType := refSchema.SchemaType
+				if refType == "" {
+					refType = "AVRO"
+				}
+				switch strings.ToUpper(refType) {
+				case "AVRO":
+					explainAvro(refSchema.Schema, &refExplanation)
+				case "JSON":
+					explainJSONSchema(refSchema.Schema, &refExplanation)
+				}
+				refExp.Fields = refExplanation.Fields
+			}
+			explanation.References = append(explanation.References, refExp)
 		}
 	} else {
 		return fmt.Errorf("provide a subject name or use --file")
@@ -483,5 +501,19 @@ func displayExplanation(exp SchemaExplanation) {
 			rows = append(rows, []string{ref.Name, ref.Subject, fmt.Sprintf("%d", ref.Version)})
 		}
 		output.PrintTable(headers, rows)
+
+		// Show fields of referenced schemas
+		for _, ref := range exp.References {
+			if len(ref.Fields) > 0 {
+				fmt.Println()
+				output.SubHeader("  %s fields", ref.Name)
+				refHeaders := []string{"Name", "Type", "Description"}
+				var refRows [][]string
+				for _, f := range ref.Fields {
+					refRows = append(refRows, []string{f.Name, f.Type, f.Doc})
+				}
+				output.PrintTable(refHeaders, refRows)
+			}
+		}
 	}
 }

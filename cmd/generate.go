@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"regexp"
 	"sort"
 	"strings"
 
@@ -159,6 +160,7 @@ func readJSONSamples(reader io.Reader) ([]map[string]interface{}, error) {
 type inferredField struct {
 	Name       string
 	Type       string // avro type: string, int, long, double, boolean, null
+	Format     string // detected format: date-time, date, uuid, email (for doc/hints)
 	IsNullable bool
 	IsArray    bool
 	ItemType   string // for arrays
@@ -193,12 +195,37 @@ func inferFieldTypes(samples []map[string]interface{}) map[string]*inferredField
 	return fields
 }
 
+// Common format patterns for string type inference
+var (
+	isoDateTimeRe = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}`)
+	isoDateRe     = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}$`)
+	uuidRe        = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
+	emailRe       = regexp.MustCompile(`^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$`)
+)
+
+// inferStringFormat detects common string formats for documentation
+func inferStringFormat(value string) string {
+	switch {
+	case isoDateTimeRe.MatchString(value):
+		return "date-time"
+	case isoDateRe.MatchString(value):
+		return "date"
+	case uuidRe.MatchString(value):
+		return "uuid"
+	case emailRe.MatchString(value):
+		return "email"
+	default:
+		return ""
+	}
+}
+
 func inferType(name string, value interface{}) *inferredField {
 	field := &inferredField{Name: name}
 
 	switch v := value.(type) {
 	case string:
 		field.Type = "string"
+		field.Format = inferStringFormat(v)
 	case float64:
 		// Check if it's an integer
 		if v == float64(int64(v)) {
@@ -284,6 +311,11 @@ func buildAvroFields(fields map[string]*inferredField) []interface{} {
 		f := fields[name]
 		field := map[string]interface{}{
 			"name": name,
+		}
+
+		// Add format hint as doc if detected
+		if f.Format != "" {
+			field["doc"] = fmt.Sprintf("format: %s", f.Format)
 		}
 
 		if f.IsObject && f.Children != nil {
@@ -464,6 +496,9 @@ func buildJSONSchemaProperties(fields map[string]*inferredField) (map[string]int
 			}
 		} else {
 			prop["type"] = avroToJSONSchemaType(f.Type)
+			if f.Format != "" {
+				prop["format"] = f.Format
+			}
 		}
 
 		props[name] = prop

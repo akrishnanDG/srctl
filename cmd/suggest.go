@@ -162,8 +162,21 @@ func parseChangeDescription(desc string) (action, fieldName, targetName string) 
 		return "add", fieldName, ""
 	}
 
-	// Fallback: treat the whole description as an add
+	// Fallback: try to extract a reasonable field name from the description
+	// If the description doesn't match any known pattern, default to add
+	// but flag it as a best-guess interpretation
 	return "add", toCamelCase(desc), ""
+}
+
+// SupportedActions returns usage help for the suggest command's parser
+func SupportedActions() string {
+	return `Supported change descriptions:
+  "add <field name>"                    - Add a new field
+  "add a <descriptive name> field"      - Add with multi-word name (auto camelCase)
+  "remove <field name>"                 - Remove a field
+  "delete <field name>"                 - Remove a field
+  "rename <old> to <new>"              - Rename a field
+  "change <field> type to <type>"       - Change field type`
 }
 
 func toCamelCase(s string) string {
