@@ -17,10 +17,11 @@ The solution is **schema references**: decomposing a monolithic schema into smal
 - [5. Decomposition Strategy](#5-decomposition-strategy)
 - [6. Using srctl split](#6-using-srctl-split)
 - [7. Client-Side Impact](#7-client-side-impact)
-- [8. Migration Rules and Data Contracts](#8-migration-rules-and-data-contracts)
-- [9. Registration Workflow](#9-registration-workflow)
-- [10. Best Practices](#10-best-practices)
-- [11. Troubleshooting](#11-troubleshooting)
+- [8. Migrating from Monolithic to Split (Same Subject)](#8-migrating-from-monolithic-to-split-same-subject)
+- [9. Migration Rules and Data Contracts](#9-migration-rules-and-data-contracts)
+- [10. Registration Workflow](#10-registration-workflow)
+- [11. Best Practices](#11-best-practices)
+- [12. Troubleshooting](#12-troubleshooting)
 
 ---
 
@@ -586,7 +587,129 @@ srctl split register \
 
 ---
 
-## 8. Migration Rules and Data Contracts
+## 8. Migrating from Monolithic to Split (Same Subject)
+
+A common concern: if a client is already producing/consuming with the monolithic schema (v1) and you register a split version (v2) under the **same subject**, does it break compatibility?
+
+**No. It works seamlessly.** Here's exactly what happens and why.
+
+### How the Registry Checks Compatibility
+
+When you register a split schema as v2, the Schema Registry does **not** compare the raw schema strings. It:
+
+1. Fetches all referenced schemas (transitively)
+2. Assembles the **fully resolved schema** (root + all references inlined)
+3. Compares that resolved schema against v1 for compatibility
+
+If you split without changing any fields, types, or defaults, the resolved v2 schema is **structurally identical** to v1. The compatibility check passes.
+
+### Step-by-Step: What Happens
+
+```
+Subject: orders-value
+
+v1 (monolithic):
+  Schema: { full schema with Address, Customer, LineItem inline }
+  References: none
+  Schema ID: 100
+
+v2 (split):
+  Schema: { root with type references: "com.example.types.Address", etc. }
+  References: [Address:1, Customer:1, LineItem:1]
+  Schema ID: 200
+
+Registry resolves v2 → identical logical schema to v1 → compatibility passes ✓
+```
+
+### Wire Format Is Identical
+
+The Avro binary encoding is determined by the **resolved schema**, which is identical in both cases:
+
+```
+Producer using v1:  [magic byte][schema ID = 100][avro binary payload]
+Producer using v2:  [magic byte][schema ID = 200][avro binary payload]
+                                                  ↑ same bytes
+```
+
+A consumer reading either message fetches the schema ID, resolves it (including references for v2), and deserializes. The result is identical.
+
+### What Each Client Sees
+
+| Client | Behavior | Changes Needed |
+|--------|----------|----------------|
+| Existing producer (v1) | Continues writing with schema ID 100 | None |
+| Existing consumer | Reads both v1 and v2 messages identically | None |
+| New producer (v2) | Writes with schema ID 200, same binary format | None (if using `use.latest.version=true`) |
+| New consumer | Resolves references transparently | None (SerDe 5.5.0+) |
+
+### Verified on Confluent Cloud
+
+This was tested against a live Confluent Cloud Schema Registry:
+
+```bash
+# 1. Register monolithic schema
+srctl register orders-value --file order-monolithic.avsc
+
+# 2. Register sub-schemas as separate subjects
+srctl register com.example.types.Address --file address.avsc
+srctl register com.example.types.Money   --file money.avsc
+
+# 3. Register split version under SAME subject
+srctl register orders-value --file order-split.avsc \
+  --ref "com.example.types.Address=com.example.types.Address:1" \
+  --ref "com.example.types.Money=com.example.types.Money:1"
+# ✓ Registered as v2, compatibility check passed
+
+# 4. Both versions coexist
+srctl versions orders-value
+# VERSION | SCHEMA ID
+# 1       | 100      (monolithic)
+# 2       | 200      (split with references)
+
+# 5. Diff shows zero field changes
+srctl diff orders-value@1 orders-value@2
+# Added:     0 field(s)
+# Removed:   0 field(s)
+# Modified:  2 field(s)  ← representation changed, not structure
+# Unchanged: 1 field(s)
+```
+
+The `Modified` fields reflect that the raw type representation changed from inline `record` to a reference string like `com.example.types.Address`, but the **resolved schema** and **binary encoding** are identical.
+
+### When It WOULD Break
+
+The split itself never breaks compatibility. It breaks only if you **also change the schema structure** during the split:
+
+```
+# Safe (pure split, no field changes):
+v1: monolithic with [orderId, customer.name, customer.email]
+v2: split references, same fields [orderId, customer.name, customer.email]
+→ Compatible ✓
+
+# Breaks (changed fields during split):
+v1: monolithic with [orderId, customer.name, customer.email]
+v2: split, but also removed customer.email
+→ Incompatible ✗ (under BACKWARD)
+```
+
+Use `srctl validate` to check before registering:
+
+```bash
+# Check locally before touching the registry
+srctl validate --file order-split.avsc --against order-monolithic.avsc --compatibility BACKWARD
+```
+
+### Recommended Migration Procedure
+
+1. **Validate locally** -- `srctl validate --file split.avsc --against monolithic.avsc`
+2. **Register sub-schemas** -- leaf types first, then dependents (bottom-up)
+3. **Register split root as new version** -- under the same subject
+4. **Verify** -- `srctl diff subject@1 subject@2` shows zero field additions/removals
+5. **Roll out** -- no client changes needed; new producers pick up v2 automatically with `use.latest.version=true`
+
+---
+
+## 9. Migration Rules and Data Contracts
 
 ### When You Need Migration Rules
 
@@ -673,7 +796,7 @@ srctl contract validate orders-value --schema order-v2.avsc
 
 ---
 
-## 9. Registration Workflow
+## 10. Registration Workflow
 
 ### Step-by-Step Process
 
@@ -717,7 +840,7 @@ srctl get orders-value --with-refs \
 
 ---
 
-## 10. Best Practices
+## 11. Best Practices
 
 ### Subject Naming for References
 
@@ -755,7 +878,7 @@ srctl get my-subject --with-refs
 
 ---
 
-## 11. Troubleshooting
+## 12. Troubleshooting
 
 ### "Schema too large" Error
 Your schema exceeds the 1MB limit. Use `srctl split analyze` to identify extractable types and plan the decomposition.
