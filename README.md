@@ -14,6 +14,9 @@ A powerful CLI tool for Confluent Schema Registry that provides advanced capabil
 - **evolve** - Analyze schema evolution history with breaking change detection
 - **validate** - Validate schema syntax and compatibility offline (no registry needed)
 - **search** - Search schemas by field name, type, tag, or content across the registry
+- **explain** - Describe a schema in human-readable terms (fields, types, references)
+- **suggest** - Propose compatible schema changes from a natural language description
+- **generate** - Infer a schema (Avro/Protobuf/JSON) from sample JSON data
 
 ### Schema Splitting
 - **split analyze** - Analyze a schema and show extractable types, sizes, and dependency tree
