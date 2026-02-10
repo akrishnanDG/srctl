@@ -510,13 +510,21 @@ func splitAvroSchema(content string, minSize int, subjectPrefix string) (*SplitR
 		return nil, fmt.Errorf("expected Avro schema to be a JSON object")
 	}
 
+	// Work on a deep copy so the original schema is preserved for min-size filtering.
+	// extractAvroNamedTypes modifies the schema in-place (replaces inline records with
+	// reference strings), so without a copy the original structure is lost.
+	var schemaCopy interface{}
+	copyBytes, _ := json.Marshal(schemaMap)
+	json.Unmarshal(copyBytes, &schemaCopy)
+	schemaCopyMap := schemaCopy.(map[string]interface{})
+
 	// Extract all named types (records, enums, fixed)
 	extractedTypes := make(map[string]map[string]interface{})
 	typeDeps := make(map[string][]string)
 
 	// Walk the schema tree and extract named types
-	rootName := getAvroFullName(schemaMap)
-	extractAvroNamedTypes(schemaMap, "", extractedTypes, typeDeps)
+	rootName := getAvroFullName(schemaCopyMap)
+	extractAvroNamedTypes(schemaCopyMap, "", extractedTypes, typeDeps)
 
 	if len(extractedTypes) <= 1 {
 		// Only the root type - nothing to split
@@ -563,8 +571,40 @@ func splitAvroSchema(content string, minSize int, subjectPrefix string) (*SplitR
 		}, nil
 	}
 
+	// When min-size filtering removed some types, rebuild from the original
+	// schema and only replace types that survived the filter. This ensures the
+	// root schema inlines small types and only references extracted ones.
+	if minSize > 0 {
+		survivedTypes := make(map[string]bool)
+		for name := range extractedTypes {
+			if name != rootName {
+				survivedTypes[name] = true
+			}
+		}
+
+		// Rebuild from original: walk the original schema tree, only extract
+		// types in survivedTypes, leave everything else inline.
+		var freshCopy interface{}
+		json.Unmarshal(copyBytes, &freshCopy)
+		freshMap := freshCopy.(map[string]interface{})
+
+		extractedTypes = make(map[string]map[string]interface{})
+		typeDeps = make(map[string][]string)
+		extractAvroNamedTypesSelective(freshMap, "", extractedTypes, typeDeps, survivedTypes)
+
+		if len(extractedTypes) <= 1 {
+			return &SplitResult{
+				OriginalSize:      len(content),
+				SchemaType:        "AVRO",
+				Types:             []ExtractedType{{Name: rootName, Subject: rootName, Schema: content, SchemaType: "AVRO", Size: len(content), IsRoot: true, Order: 0}},
+				RegistrationOrder: []string{rootName},
+			}, nil
+		}
+		schemaCopyMap = freshMap
+	}
+
 	// Build the root schema with references instead of inline types
-	rootSchema := buildAvroRootSchema(schemaMap, extractedTypes, rootName)
+	rootSchema := buildAvroRootSchema(schemaCopyMap, extractedTypes, rootName)
 
 	// Post-extraction pass: scan all extracted types for string-based references
 	// to other extracted types. This catches cases where a type uses another
@@ -710,6 +750,176 @@ func extractAvroNamedTypes(schema map[string]interface{}, parentNamespace string
 	}
 }
 
+// extractAvroNamedTypesSelective is like extractAvroNamedTypes but only extracts
+// types whose fully qualified name is in the keepSet. All other named types are
+// left inline in their parent schema.
+func extractAvroNamedTypesSelective(schema map[string]interface{}, parentNamespace string, extracted map[string]map[string]interface{}, deps map[string][]string, keepSet map[string]bool) {
+	schemaType, _ := schema["type"].(string)
+	namespace, hasNS := schema["namespace"].(string)
+	if !hasNS {
+		namespace = parentNamespace
+	}
+
+	fullName := getAvroFullName(schema)
+
+	if schemaType == "record" || schemaType == "enum" || schemaType == "fixed" {
+		shouldExtract := keepSet[fullName]
+
+		if shouldExtract {
+			// Extract this type: store it and replace inline defs in its fields
+			typeCopy := make(map[string]interface{})
+			for k, v := range schema {
+				typeCopy[k] = v
+			}
+			if namespace != "" {
+				typeCopy["namespace"] = namespace
+			}
+
+			if schemaType == "record" {
+				if fields, ok := schema["fields"].([]interface{}); ok {
+					newFields := make([]interface{}, 0, len(fields))
+					for _, f := range fields {
+						field, ok := f.(map[string]interface{})
+						if !ok {
+							newFields = append(newFields, f)
+							continue
+						}
+						newField := make(map[string]interface{})
+						for k, v := range field {
+							newField[k] = v
+						}
+						depNames := extractAvroFieldDepsSelective(field["type"], namespace, extracted, deps, keepSet)
+						for _, d := range depNames {
+							deps[fullName] = appendUnique(deps[fullName], d)
+						}
+						newField["type"] = replaceAvroInlineTypesSelective(field["type"], namespace, keepSet)
+						newFields = append(newFields, newField)
+					}
+					typeCopy["fields"] = newFields
+				}
+			}
+			extracted[fullName] = typeCopy
+		} else if schemaType == "record" {
+			// Don't extract, but recurse into fields to find extractable children
+			if fields, ok := schema["fields"].([]interface{}); ok {
+				for _, f := range fields {
+					field, ok := f.(map[string]interface{})
+					if !ok {
+						continue
+					}
+					walkAvroFieldForSelective(field["type"], namespace, extracted, deps, keepSet, fullName)
+				}
+			}
+		}
+	}
+}
+
+func walkAvroFieldForSelective(fieldType interface{}, namespace string, extracted map[string]map[string]interface{}, deps map[string][]string, keepSet map[string]bool, parentName string) {
+	switch ft := fieldType.(type) {
+	case map[string]interface{}:
+		typeName, _ := ft["type"].(string)
+		switch typeName {
+		case "record", "enum", "fixed":
+			childName := getAvroFullName(ft)
+			if keepSet[childName] {
+				extractAvroNamedTypesSelective(ft, namespace, extracted, deps, keepSet)
+				deps[parentName] = appendUnique(deps[parentName], childName)
+			} else if typeName == "record" {
+				// Recurse into non-extracted records to find deeper extractable types
+				if fields, ok := ft["fields"].([]interface{}); ok {
+					for _, f := range fields {
+						field, ok := f.(map[string]interface{})
+						if !ok {
+							continue
+						}
+						walkAvroFieldForSelective(field["type"], namespace, extracted, deps, keepSet, parentName)
+					}
+				}
+			}
+		case "array":
+			if items, ok := ft["items"]; ok {
+				walkAvroFieldForSelective(items, namespace, extracted, deps, keepSet, parentName)
+			}
+		case "map":
+			if values, ok := ft["values"]; ok {
+				walkAvroFieldForSelective(values, namespace, extracted, deps, keepSet, parentName)
+			}
+		}
+	case []interface{}:
+		for _, ut := range ft {
+			walkAvroFieldForSelective(ut, namespace, extracted, deps, keepSet, parentName)
+		}
+	}
+}
+
+func extractAvroFieldDepsSelective(fieldType interface{}, namespace string, extracted map[string]map[string]interface{}, deps map[string][]string, keepSet map[string]bool) []string {
+	var depNames []string
+	switch ft := fieldType.(type) {
+	case map[string]interface{}:
+		typeName, _ := ft["type"].(string)
+		switch typeName {
+		case "record", "enum", "fixed":
+			childName := getAvroFullName(ft)
+			if keepSet[childName] {
+				extractAvroNamedTypesSelective(ft, namespace, extracted, deps, keepSet)
+				depNames = append(depNames, childName)
+			}
+		case "array":
+			if items, ok := ft["items"]; ok {
+				depNames = append(depNames, extractAvroFieldDepsSelective(items, namespace, extracted, deps, keepSet)...)
+			}
+		case "map":
+			if values, ok := ft["values"]; ok {
+				depNames = append(depNames, extractAvroFieldDepsSelective(values, namespace, extracted, deps, keepSet)...)
+			}
+		}
+	case []interface{}:
+		for _, ut := range ft {
+			depNames = append(depNames, extractAvroFieldDepsSelective(ut, namespace, extracted, deps, keepSet)...)
+		}
+	}
+	return depNames
+}
+
+func replaceAvroInlineTypesSelective(fieldType interface{}, namespace string, keepSet map[string]bool) interface{} {
+	switch ft := fieldType.(type) {
+	case string:
+		return ft
+	case map[string]interface{}:
+		typeName, _ := ft["type"].(string)
+		switch typeName {
+		case "record", "enum", "fixed":
+			fullName := getAvroFullName(ft)
+			if keepSet[fullName] {
+				return fullName
+			}
+			return ft // Leave inline
+		case "array":
+			result := map[string]interface{}{"type": "array"}
+			if items, ok := ft["items"]; ok {
+				result["items"] = replaceAvroInlineTypesSelective(items, namespace, keepSet)
+			}
+			return result
+		case "map":
+			result := map[string]interface{}{"type": "map"}
+			if values, ok := ft["values"]; ok {
+				result["values"] = replaceAvroInlineTypesSelective(values, namespace, keepSet)
+			}
+			return result
+		default:
+			return ft
+		}
+	case []interface{}:
+		result := make([]interface{}, 0, len(ft))
+		for _, ut := range ft {
+			result = append(result, replaceAvroInlineTypesSelective(ut, namespace, keepSet))
+		}
+		return result
+	default:
+		return ft
+	}
+}
+
 func extractAvroFieldDeps(fieldType interface{}, namespace string, extracted map[string]map[string]interface{}, deps map[string][]string) []string {
 	var depNames []string
 
@@ -808,6 +1018,62 @@ func replaceAvroInlineTypes(fieldType interface{}, namespace string, extracted m
 		result := make([]interface{}, 0, len(ft))
 		for _, ut := range ft {
 			result = append(result, replaceAvroInlineTypes(ut, namespace, extracted))
+		}
+		return result
+	default:
+		return ft
+	}
+}
+
+// rebuildAvroSchemaSelective walks a schema and only replaces inline record/enum/fixed
+// types that exist in the keepTypes map. All other inline types are left as-is.
+func rebuildAvroSchemaSelective(schema map[string]interface{}, keepTypes map[string]map[string]interface{}) {
+	if fields, ok := schema["fields"].([]interface{}); ok {
+		for i, f := range fields {
+			field, ok := f.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			field["type"] = replaceAvroSelectiveTypes(field["type"], schema["namespace"], keepTypes)
+			fields[i] = field
+		}
+	}
+}
+
+func replaceAvroSelectiveTypes(fieldType interface{}, parentNS interface{}, keepTypes map[string]map[string]interface{}) interface{} {
+	ns, _ := parentNS.(string)
+	switch ft := fieldType.(type) {
+	case map[string]interface{}:
+		typeName, _ := ft["type"].(string)
+		switch typeName {
+		case "record", "enum", "fixed":
+			fullName := getAvroFullName(ft)
+			if _, keep := keepTypes[fullName]; keep {
+				// This type should be extracted — will be handled by extractAvroNamedTypes
+				return ft
+			}
+			// Not in keep set — recurse into its fields but leave inline
+			if typeName == "record" {
+				rebuildAvroSchemaSelective(ft, keepTypes)
+			}
+			return ft
+		case "array":
+			if items, ok := ft["items"]; ok {
+				ft["items"] = replaceAvroSelectiveTypes(items, parentNS, keepTypes)
+			}
+			return ft
+		case "map":
+			if values, ok := ft["values"]; ok {
+				ft["values"] = replaceAvroSelectiveTypes(values, ns, keepTypes)
+			}
+			return ft
+		default:
+			return ft
+		}
+	case []interface{}:
+		result := make([]interface{}, 0, len(ft))
+		for _, ut := range ft {
+			result = append(result, replaceAvroSelectiveTypes(ut, parentNS, keepTypes))
 		}
 		return result
 	default:
