@@ -182,11 +182,11 @@ func runRegister(cmd *cobra.Command, args []string) error {
 	}
 
 	return printer.Print(map[string]interface{}{
-		"subject":  subject,
-		"id":       id,
-		"type":     schemaType,
-		"context":  context,
-		"message":  "Schema registered successfully",
+		"subject": subject,
+		"id":      id,
+		"type":    schemaType,
+		"context": context,
+		"message": "Schema registered successfully",
 	})
 }
 
@@ -284,4 +284,3 @@ func showSchemaDiff(old, new string) {
 	// A full implementation would use a proper diff library
 	output.Info("Schema diff visualization would be shown here")
 }
-

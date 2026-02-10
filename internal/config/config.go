@@ -131,4 +131,3 @@ func InitConfig(registry Registry) error {
 	AppConfig.DefaultOutput = "table"
 	return SaveConfig()
 }
-

@@ -905,4 +905,3 @@ func cloneSchemasParallel(targetClient *client.SchemaRegistryClient, schemas []s
 
 	return int(clonedCount), int(skippedCount), int(failedCount)
 }
-

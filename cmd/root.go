@@ -35,11 +35,11 @@ See 'srctl [command] --help' for command-specific options.`,
 
 // Command group IDs
 const (
-	groupSchema     = "schema"
-	groupBulk       = "bulk"
-	groupCrossReg   = "crossreg"
-	groupContract   = "contract"
-	groupConfig     = "config"
+	groupSchema   = "schema"
+	groupBulk     = "bulk"
+	groupCrossReg = "crossreg"
+	groupContract = "contract"
+	groupConfig   = "config"
 )
 
 func init() {
@@ -177,4 +177,3 @@ func GetClientForRegistry(name string) (*client.SchemaRegistryClient, error) {
 
 	return c, nil
 }
-

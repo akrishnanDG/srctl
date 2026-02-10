@@ -20,10 +20,10 @@ import (
 )
 
 var (
-	importDryRun          bool
-	importSkipExisting    bool
-	importCompatibility   string
-	importTargetContext   string
+	importDryRun        bool
+	importSkipExisting  bool
+	importCompatibility string
+	importTargetContext string
 )
 
 var importCmd = &cobra.Command{
@@ -285,8 +285,8 @@ func readFromTar(tarPath string) ([]schemaToImport, error) {
 
 	tarReader := tar.NewReader(gzReader)
 
-	schemaFiles := make(map[string]string)    // path -> content
-	metadataFiles := make(map[string]string)  // path -> content
+	schemaFiles := make(map[string]string)   // path -> content
+	metadataFiles := make(map[string]string) // path -> content
 
 	for {
 		header, err := tarReader.Next()
@@ -711,4 +711,3 @@ func performImport(c *client.SchemaRegistryClient, schemas []schemaToImport, exi
 
 	return nil
 }
-

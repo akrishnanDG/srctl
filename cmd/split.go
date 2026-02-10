@@ -160,23 +160,23 @@ func init() {
 
 // ExtractedType represents a named type extracted from a schema
 type ExtractedType struct {
-	Name       string           `json:"name"`       // Fully qualified name (e.g., com.example.types.Address)
-	Subject    string           `json:"subject"`    // Subject to register under
-	Schema     string           `json:"schema"`     // The extracted schema content
-	SchemaType string           `json:"schemaType"` // AVRO, PROTOBUF, JSON
-	Size       int              `json:"size"`       // Size in bytes
-	References []string         `json:"references"` // Names of types this depends on
-	IsRoot     bool             `json:"isRoot"`     // Whether this is the root schema
-	Order      int              `json:"order"`      // Registration order (0-based)
+	Name       string   `json:"name"`       // Fully qualified name (e.g., com.example.types.Address)
+	Subject    string   `json:"subject"`    // Subject to register under
+	Schema     string   `json:"schema"`     // The extracted schema content
+	SchemaType string   `json:"schemaType"` // AVRO, PROTOBUF, JSON
+	Size       int      `json:"size"`       // Size in bytes
+	References []string `json:"references"` // Names of types this depends on
+	IsRoot     bool     `json:"isRoot"`     // Whether this is the root schema
+	Order      int      `json:"order"`      // Registration order (0-based)
 }
 
 // SplitResult contains the full result of a schema split operation
 type SplitResult struct {
-	OriginalSize   int              `json:"originalSize"`
-	OriginalFile   string           `json:"originalFile"`
-	SchemaType     string           `json:"schemaType"`
-	Types          []ExtractedType  `json:"types"`
-	RegistrationOrder []string      `json:"registrationOrder"`
+	OriginalSize      int             `json:"originalSize"`
+	OriginalFile      string          `json:"originalFile"`
+	SchemaType        string          `json:"schemaType"`
+	Types             []ExtractedType `json:"types"`
+	RegistrationOrder []string        `json:"registrationOrder"`
 }
 
 // ========================

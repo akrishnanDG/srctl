@@ -14,8 +14,8 @@ import (
 )
 
 var validateCmd = &cobra.Command{
-	Use:   "validate",
-	Short: "Validate schema syntax and compatibility offline",
+	Use:     "validate",
+	Short:   "Validate schema syntax and compatibility offline",
 	GroupID: groupSchema,
 	Long: `Validate schemas without requiring a running Schema Registry.
 

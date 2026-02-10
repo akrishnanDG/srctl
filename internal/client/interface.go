@@ -6,7 +6,7 @@ type SchemaRegistryClientInterface interface {
 	// Subjects
 	GetSubjects(includeDeleted bool) ([]string, error)
 	GetVersions(subject string, includeDeleted bool) ([]int, error)
-	
+
 	// Schemas
 	GetSchema(subject string, version string) (*Schema, error)
 	GetSchemaWithDeleted(subject string, version string, includeDeleted bool) (*Schema, error)
@@ -17,26 +17,26 @@ type SchemaRegistryClientInterface interface {
 	CheckCompatibility(subject string, schema *Schema, version string) (bool, error)
 	GetAllSchemas(includeDeleted bool) ([]Schema, error)
 	GetSchemaTypes() ([]string, error)
-	
+
 	// Subjects operations
 	DeleteSubject(subject string, permanent bool) ([]int, error)
 	DeleteVersion(subject string, version string, permanent bool) (int, error)
-	
+
 	// Config
 	GetConfig() (*Config, error)
 	GetSubjectConfig(subject string, defaultToGlobal bool) (*Config, error)
 	SetConfig(compatibility string) error
 	SetSubjectConfig(subject string, compatibility string) error
-	
+
 	// Mode
 	GetMode() (*Mode, error)
 	GetSubjectMode(subject string, defaultToGlobal bool) (*Mode, error)
 	SetMode(mode string) error
 	SetSubjectMode(subject string, mode string) error
-	
+
 	// Contexts
 	GetContexts() ([]string, error)
-	
+
 	// Tags
 	GetTags() ([]Tag, error)
 	CreateTag(tag *Tag) error

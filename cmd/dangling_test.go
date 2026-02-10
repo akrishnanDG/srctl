@@ -134,8 +134,8 @@ func TestMockClientForDangling(t *testing.T) {
 func TestDanglingDetection(t *testing.T) {
 	// Test the logic for detecting dangling references
 	activeMap := map[string]bool{
-		"user-events":   true,
-		"order-events":  true,
+		"user-events":  true,
+		"order-events": true,
 		// "common-types" is NOT in activeMap (soft-deleted)
 	}
 

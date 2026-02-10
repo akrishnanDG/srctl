@@ -13,8 +13,8 @@ import (
 )
 
 var explainCmd = &cobra.Command{
-	Use:   "explain [subject]",
-	Short: "Describe a schema in human-readable terms",
+	Use:     "explain [subject]",
+	Short:   "Describe a schema in human-readable terms",
 	GroupID: groupSchema,
 	Long: `Produce a human-readable description of a schema, including field names,
 types, documentation, references, and structure. Useful for understanding
@@ -53,18 +53,18 @@ func init() {
 
 // SchemaExplanation is the structured output for explain
 type SchemaExplanation struct {
-	Name       string               `json:"name"`
-	Namespace  string               `json:"namespace,omitempty"`
-	SchemaType string               `json:"schemaType"`
-	RecordType string               `json:"recordType"` // record, enum, fixed, message, object
-	Doc        string               `json:"doc,omitempty"`
-	Fields     []FieldExplanation   `json:"fields,omitempty"`
-	Symbols    []string             `json:"symbols,omitempty"` // for enums
-	References []RefExplanation     `json:"references,omitempty"`
-	Size       int                  `json:"size"`
-	Subject    string               `json:"subject,omitempty"`
-	Version    int                  `json:"version,omitempty"`
-	SchemaID   int                  `json:"schemaId,omitempty"`
+	Name       string             `json:"name"`
+	Namespace  string             `json:"namespace,omitempty"`
+	SchemaType string             `json:"schemaType"`
+	RecordType string             `json:"recordType"` // record, enum, fixed, message, object
+	Doc        string             `json:"doc,omitempty"`
+	Fields     []FieldExplanation `json:"fields,omitempty"`
+	Symbols    []string           `json:"symbols,omitempty"` // for enums
+	References []RefExplanation   `json:"references,omitempty"`
+	Size       int                `json:"size"`
+	Subject    string             `json:"subject,omitempty"`
+	Version    int                `json:"version,omitempty"`
+	SchemaID   int                `json:"schemaId,omitempty"`
 }
 
 // FieldExplanation describes a single field

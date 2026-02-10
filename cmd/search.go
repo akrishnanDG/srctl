@@ -17,8 +17,8 @@ import (
 )
 
 var searchCmd = &cobra.Command{
-	Use:   "search",
-	Short: "Search schemas by field, type, tag, or content",
+	Use:     "search",
+	Short:   "Search schemas by field, type, tag, or content",
 	GroupID: groupSchema,
 	Long: `Search across all schemas in the registry by field name, type, tag,
 or content. Useful for governance, discovery, and impact analysis.

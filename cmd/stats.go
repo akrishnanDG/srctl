@@ -111,20 +111,20 @@ type SubjectSizeInfo struct {
 
 // subjectResult holds the analysis result for a single subject
 type subjectResult struct {
-	Subject           string
-	VersionCount      int
-	TotalSize         int64
-	SchemaIDs         []int
-	TypeCounts        map[string]int
-	TotalRefCount     int // Total number of references across all versions
-	VersionsWithRefs  int // Number of schema versions that have references
-	MinID             int
-	MaxID             int
-	MinSize           int64
-	MaxSize           int64
-	MaxSizeInfo       string
-	Errors            []string
-	IsInternal        bool
+	Subject          string
+	VersionCount     int
+	TotalSize        int64
+	SchemaIDs        []int
+	TypeCounts       map[string]int
+	TotalRefCount    int // Total number of references across all versions
+	VersionsWithRefs int // Number of schema versions that have references
+	MinID            int
+	MaxID            int
+	MinSize          int64
+	MaxSize          int64
+	MaxSizeInfo      string
+	Errors           []string
+	IsInternal       bool
 }
 
 // isInternalSubject checks if a subject is an internal/system subject

@@ -8,9 +8,9 @@ import (
 
 func TestCheckReferentialIntegrityFlag(t *testing.T) {
 	tests := []struct {
-		name           string
-		skipCheck      bool
-		expectSkipped  bool
+		name          string
+		skipCheck     bool
+		expectSkipped bool
 	}{
 		{
 			name:          "skip check disabled",

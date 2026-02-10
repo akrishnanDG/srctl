@@ -634,9 +634,9 @@ type Tag struct {
 
 // TagAssignment represents a tag assignment to a schema or subject
 type TagAssignment struct {
-	TypeName   string `json:"typeName"`
-	EntityType string `json:"entityType"`
-	EntityName string `json:"entityName"`
+	TypeName   string            `json:"typeName"`
+	EntityType string            `json:"entityType"`
+	EntityName string            `json:"entityName"`
 	Attributes map[string]string `json:"attributes,omitempty"`
 }
 
@@ -820,4 +820,3 @@ func (c *SchemaRegistryClient) RemoveTagFromSchema(subject string, version int, 
 
 	return nil
 }
-

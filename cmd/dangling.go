@@ -68,13 +68,13 @@ type DanglingReference struct {
 
 // DanglingReport contains the full report
 type DanglingReport struct {
-	TotalSubjects     int                 `json:"totalSubjects"`
-	TotalVersions     int                 `json:"totalVersions"`
-	SchemasWithRefs   int                 `json:"schemasWithRefs"`
-	DanglingCount     int                 `json:"danglingCount"`
-	DanglingRefs      []DanglingReference `json:"danglingReferences"`
-	DeletedSubjects   []string            `json:"deletedSubjects"`
-	AffectedSubjects  int                 `json:"affectedSubjects"`
+	TotalSubjects    int                 `json:"totalSubjects"`
+	TotalVersions    int                 `json:"totalVersions"`
+	SchemasWithRefs  int                 `json:"schemasWithRefs"`
+	DanglingCount    int                 `json:"danglingCount"`
+	DanglingRefs     []DanglingReference `json:"danglingReferences"`
+	DeletedSubjects  []string            `json:"deletedSubjects"`
+	AffectedSubjects int                 `json:"affectedSubjects"`
 }
 
 func runDangling(cmd *cobra.Command, args []string) error {
@@ -208,10 +208,10 @@ func runDangling(cmd *cobra.Command, args []string) error {
 }
 
 type danglingResult struct {
-	Subject       string
-	VersionCount  int
-	RefsFound     int
-	DanglingRefs  []DanglingReference
+	Subject      string
+	VersionCount int
+	RefsFound    int
+	DanglingRefs []DanglingReference
 }
 
 func analyzeDanglingParallel(c *client.SchemaRegistryClient, subjects []string, activeMap map[string]bool, workers int) DanglingReport {

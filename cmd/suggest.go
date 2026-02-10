@@ -13,8 +13,8 @@ import (
 )
 
 var suggestCmd = &cobra.Command{
-	Use:   "suggest [subject] <description>",
-	Short: "Propose compatible schema changes from a description",
+	Use:     "suggest [subject] <description>",
+	Short:   "Propose compatible schema changes from a description",
 	GroupID: groupSchema,
 	Long: `Given a change description (e.g., "add discount code"), analyzes the
 current schema and proposes a compatible modification. Warns about
@@ -55,16 +55,16 @@ func init() {
 
 // Suggestion is the structured output
 type Suggestion struct {
-	Description   string `json:"description"`
-	Action        string `json:"action"`         // add, remove, rename, changeType
-	Compatible    bool   `json:"compatible"`
-	Compatibility string `json:"compatibility"`
-	Proposal      string `json:"proposal,omitempty"`
-	Explanation   string `json:"explanation"`
-	Warning       string `json:"warning,omitempty"`
+	Description   string   `json:"description"`
+	Action        string   `json:"action"` // add, remove, rename, changeType
+	Compatible    bool     `json:"compatible"`
+	Compatibility string   `json:"compatibility"`
+	Proposal      string   `json:"proposal,omitempty"`
+	Explanation   string   `json:"explanation"`
+	Warning       string   `json:"warning,omitempty"`
 	Alternatives  []string `json:"alternatives,omitempty"`
-	FieldName     string `json:"fieldName,omitempty"`
-	FieldDef      string `json:"fieldDef,omitempty"`
+	FieldName     string   `json:"fieldName,omitempty"`
+	FieldDef      string   `json:"fieldDef,omitempty"`
 }
 
 func runSuggest(cmd *cobra.Command, args []string) error {

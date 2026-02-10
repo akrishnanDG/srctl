@@ -16,14 +16,14 @@ import (
 )
 
 var (
-	deleteForce         bool
-	deletePermanent     bool
-	deleteKeepLatest    int
-	deletePurgeSoftDel  bool
-	deleteYes           bool
-	deleteWorkers       int
-	deleteSubjects      []string
-	deleteSkipRefCheck  bool
+	deleteForce        bool
+	deletePermanent    bool
+	deleteKeepLatest   int
+	deletePurgeSoftDel bool
+	deleteYes          bool
+	deleteWorkers      int
+	deleteSubjects     []string
+	deleteSkipRefCheck bool
 )
 
 var deleteCmd = &cobra.Command{
@@ -1221,4 +1221,3 @@ func keepLatestVersionsMulti(c *client.SchemaRegistryClient, subjects []string, 
 
 	return nil
 }
-

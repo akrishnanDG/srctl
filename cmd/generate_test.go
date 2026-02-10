@@ -104,7 +104,7 @@ func TestGenerateAvroNullable(t *testing.T) {
 func TestGenerateAvroMultipleSamples(t *testing.T) {
 	samples := []map[string]interface{}{
 		{"id": "1", "name": "Alice", "score": float64(95)},
-		{"id": "2", "name": "Bob"},   // missing score - should be nullable
+		{"id": "2", "name": "Bob"}, // missing score - should be nullable
 		{"id": "3", "name": "Carol", "score": float64(88)},
 	}
 

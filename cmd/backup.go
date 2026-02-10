@@ -95,13 +95,13 @@ type BackupManifest struct {
 		TagDefinitions int `json:"tagDefinitions,omitempty"`
 		TagAssignments int `json:"tagAssignments,omitempty"`
 	} `json:"statistics"`
-	BySchemaID  bool `json:"bySchemaId"`
+	BySchemaID   bool `json:"bySchemaId"`
 	IncludesTags bool `json:"includesTags,omitempty"`
 }
 
 // TagBackup contains tag definitions and assignments
 type TagBackup struct {
-	Definitions []client.Tag `json:"definitions"`
+	Definitions []client.Tag          `json:"definitions"`
 	Assignments []TagAssignmentBackup `json:"assignments"`
 }
 
@@ -114,10 +114,10 @@ type TagAssignmentBackup struct {
 
 // SubjectBackup contains all data for a subject
 type SubjectBackup struct {
-	Subject       string                   `json:"subject"`
-	Compatibility string                   `json:"compatibility,omitempty"`
-	Mode          string                   `json:"mode,omitempty"`
-	Versions      []SchemaVersionBackup    `json:"versions"`
+	Subject       string                `json:"subject"`
+	Compatibility string                `json:"compatibility,omitempty"`
+	Mode          string                `json:"mode,omitempty"`
+	Versions      []SchemaVersionBackup `json:"versions"`
 }
 
 // SchemaVersionBackup contains a single schema version
@@ -624,10 +624,10 @@ Examples:
 }
 
 var (
-	restoreDryRun       bool
-	restorePreserveID   bool
-	restoreSubjects     []string
-	restoreTags         bool
+	restoreDryRun        bool
+	restorePreserveID    bool
+	restoreSubjects      []string
+	restoreTags          bool
 	restoreTargetContext string
 )
 
@@ -1016,4 +1016,3 @@ func restoreTagsData(c *client.SchemaRegistryClient, backupPath string) (defsRes
 
 	return defsRestored, assignsRestored
 }
-

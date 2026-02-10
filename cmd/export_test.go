@@ -148,7 +148,7 @@ func TestGetSchemaExtension(t *testing.T) {
 		{"AVRO", "avsc"},
 		{"PROTOBUF", "proto"},
 		{"JSON", "json"},
-		{"", "avsc"},       // default
+		{"", "avsc"},        // default
 		{"UNKNOWN", "avsc"}, // defaults to avsc
 	}
 

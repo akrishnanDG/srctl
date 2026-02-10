@@ -156,8 +156,8 @@ type DataContractRuleset struct {
 
 // DataContract represents the full data contract config
 type DataContract struct {
-	Metadata      map[string]string   `json:"metadata,omitempty"`
-	RuleSet       DataContractRuleset `json:"ruleSet,omitempty"`
+	Metadata map[string]string   `json:"metadata,omitempty"`
+	RuleSet  DataContractRuleset `json:"ruleSet,omitempty"`
 }
 
 func runContractGet(cmd *cobra.Command, args []string) error {

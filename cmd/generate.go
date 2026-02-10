@@ -15,8 +15,8 @@ import (
 )
 
 var generateCmd = &cobra.Command{
-	Use:   "generate",
-	Short: "Infer a schema from sample JSON data",
+	Use:     "generate",
+	Short:   "Infer a schema from sample JSON data",
 	GroupID: groupSchema,
 	Long: `Generate an Avro, Protobuf, or JSON Schema from sample JSON data.
 Reads from stdin or a file, infers field types, and outputs a complete schema.

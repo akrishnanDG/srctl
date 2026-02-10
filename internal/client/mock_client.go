@@ -20,15 +20,15 @@ type MockSchemaRegistryClient struct {
 	TagAssignments map[string][]TagAssignment // key: "subject" or "subject:version"
 
 	// Error simulation
-	ShouldError       bool
-	ErrorMessage      string
-	GetSubjectsError  error
-	GetVersionsError  error
-	GetSchemaError    error
-	DeleteError       error
-	RegisterError     error
-	ConfigError       error
-	ModeError         error
+	ShouldError      bool
+	ErrorMessage     string
+	GetSubjectsError error
+	GetVersionsError error
+	GetSchemaError   error
+	DeleteError      error
+	RegisterError    error
+	ConfigError      error
+	ModeError        error
 
 	// Call tracking
 	Calls []MockCall
