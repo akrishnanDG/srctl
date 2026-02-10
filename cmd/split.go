@@ -566,6 +566,27 @@ func splitAvroSchema(content string, minSize int, subjectPrefix string) (*SplitR
 	// Build the root schema with references instead of inline types
 	rootSchema := buildAvroRootSchema(schemaMap, extractedTypes, rootName)
 
+	// Post-extraction pass: scan all extracted types for string-based references
+	// to other extracted types. This catches cases where a type uses another
+	// extracted type by its fully qualified name (e.g., "com.example.types.Money")
+	// rather than an inline definition.
+	for typeName, typeSchema := range extractedTypes {
+		if fields, ok := typeSchema["fields"].([]interface{}); ok {
+			for _, f := range fields {
+				field, ok := f.(map[string]interface{})
+				if !ok {
+					continue
+				}
+				refs := findAvroStringTypeRefs(field["type"], extractedTypes)
+				for _, ref := range refs {
+					if ref != typeName {
+						typeDeps[typeName] = appendUnique(typeDeps[typeName], ref)
+					}
+				}
+			}
+		}
+	}
+
 	// Topological sort for registration order
 	regOrder := topologicalSort(typeDeps, rootName)
 
@@ -719,6 +740,38 @@ func extractAvroFieldDeps(fieldType interface{}, namespace string, extracted map
 	}
 
 	return depNames
+}
+
+// findAvroStringTypeRefs finds string-based references to extracted types
+// in a field's type definition. This catches cases like a field typed as
+// "com.example.types.Money" where Money was already extracted elsewhere.
+func findAvroStringTypeRefs(fieldType interface{}, extracted map[string]map[string]interface{}) []string {
+	var refs []string
+
+	switch ft := fieldType.(type) {
+	case string:
+		if _, exists := extracted[ft]; exists {
+			refs = append(refs, ft)
+		}
+	case map[string]interface{}:
+		typeName, _ := ft["type"].(string)
+		switch typeName {
+		case "array":
+			if items, ok := ft["items"]; ok {
+				refs = append(refs, findAvroStringTypeRefs(items, extracted)...)
+			}
+		case "map":
+			if values, ok := ft["values"]; ok {
+				refs = append(refs, findAvroStringTypeRefs(values, extracted)...)
+			}
+		}
+	case []interface{}:
+		for _, ut := range ft {
+			refs = append(refs, findAvroStringTypeRefs(ut, extracted)...)
+		}
+	}
+
+	return refs
 }
 
 func replaceAvroInlineTypes(fieldType interface{}, namespace string, extracted map[string]map[string]interface{}) interface{} {
