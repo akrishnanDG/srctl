@@ -49,7 +49,7 @@ func TestSplitAvroSchema(t *testing.T) {
   ]
 }`
 
-	result, err := splitAvroSchema(schema, 0, "")
+	result, err := splitAvroSchema(schema, 0, "", 0)
 	if err != nil {
 		t.Fatalf("splitAvroSchema failed: %v", err)
 	}
@@ -114,7 +114,7 @@ func TestSplitAvroSchemaNoSplitNeeded(t *testing.T) {
   ]
 }`
 
-	result, err := splitAvroSchema(schema, 0, "")
+	result, err := splitAvroSchema(schema, 0, "", 0)
 	if err != nil {
 		t.Fatalf("splitAvroSchema failed: %v", err)
 	}
@@ -147,7 +147,7 @@ func TestSplitAvroSchemaWithMinSize(t *testing.T) {
 }`
 
 	// With very high min size, small types should not be extracted
-	result, err := splitAvroSchema(schema, 100000, "")
+	result, err := splitAvroSchema(schema, 100000, "", 0)
 	if err != nil {
 		t.Fatalf("splitAvroSchema failed: %v", err)
 	}
@@ -177,7 +177,7 @@ func TestSplitAvroSchemaWithUnion(t *testing.T) {
   ]
 }`
 
-	result, err := splitAvroSchema(schema, 0, "")
+	result, err := splitAvroSchema(schema, 0, "", 0)
 	if err != nil {
 		t.Fatalf("splitAvroSchema failed: %v", err)
 	}
@@ -353,7 +353,7 @@ func TestSplitExtractWritesFiles(t *testing.T) {
 		t.Fatalf("failed to write test schema: %v", err)
 	}
 
-	result, err := splitAvroSchema(schema, 0, "")
+	result, err := splitAvroSchema(schema, 0, "", 0)
 	if err != nil {
 		t.Fatalf("splitAvroSchema failed: %v", err)
 	}

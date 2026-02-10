@@ -45,6 +45,7 @@ var (
 	splitSchemaType    string
 	splitMinSize       int
 	splitSubjectPrefix string
+	splitDepth         int
 )
 
 // splitAnalyzeCmd analyzes a schema and shows extractable types
@@ -125,11 +126,13 @@ func init() {
 	splitAnalyzeCmd.Flags().StringVarP(&splitFile, "file", "f", "", "Path to schema file")
 	splitAnalyzeCmd.Flags().StringVarP(&splitSchemaType, "type", "t", "", "Schema type: AVRO, PROTOBUF, JSON (auto-detected from extension)")
 	splitAnalyzeCmd.Flags().IntVar(&splitMinSize, "min-size", 0, "Minimum type size in bytes to extract (0 = extract all)")
+	splitAnalyzeCmd.Flags().IntVar(&splitDepth, "depth", 0, "Extraction depth: 1 = top-level fields only, 0 = all levels (default 0)")
 	_ = splitAnalyzeCmd.MarkFlagRequired("file")
 
 	splitExtractCmd.Flags().StringVarP(&splitFile, "file", "f", "", "Path to schema file")
 	splitExtractCmd.Flags().StringVarP(&splitSchemaType, "type", "t", "", "Schema type: AVRO, PROTOBUF, JSON")
 	splitExtractCmd.Flags().IntVar(&splitMinSize, "min-size", 0, "Minimum type size in bytes to extract (0 = extract all)")
+	splitExtractCmd.Flags().IntVar(&splitDepth, "depth", 0, "Extraction depth: 1 = top-level fields only, 0 = all levels (default 0)")
 	splitExtractCmd.Flags().StringVar(&splitOutputDir, "output-dir", "", "Directory to write split schemas")
 	splitExtractCmd.Flags().StringVar(&splitSubjectPrefix, "subject-prefix", "", "Prefix for extracted type subject names")
 	_ = splitExtractCmd.MarkFlagRequired("file")
@@ -138,6 +141,7 @@ func init() {
 	splitRegisterCmd.Flags().StringVarP(&splitFile, "file", "f", "", "Path to schema file")
 	splitRegisterCmd.Flags().StringVarP(&splitSchemaType, "type", "t", "", "Schema type: AVRO, PROTOBUF, JSON")
 	splitRegisterCmd.Flags().IntVar(&splitMinSize, "min-size", 0, "Minimum type size in bytes to extract (0 = extract all)")
+	splitRegisterCmd.Flags().IntVar(&splitDepth, "depth", 0, "Extraction depth: 1 = top-level fields only, 0 = all levels (default 0)")
 	splitRegisterCmd.Flags().StringVar(&splitSubject, "subject", "", "Subject name for the root schema")
 	splitRegisterCmd.Flags().StringVar(&splitSubjectPrefix, "subject-prefix", "", "Prefix for extracted type subject names")
 	splitRegisterCmd.Flags().BoolVar(&splitDryRun, "dry-run", false, "Show what would be registered without registering")
@@ -194,7 +198,7 @@ func runSplitAnalyze(cmd *cobra.Command, args []string) error {
 		schemaType = detectSchemaType(string(content), splitFile)
 	}
 
-	result, err := splitSchema(string(content), schemaType, splitFile, splitMinSize, splitSubjectPrefix)
+	result, err := splitSchema(string(content), schemaType, splitFile, splitMinSize, splitSubjectPrefix, splitDepth)
 	if err != nil {
 		return fmt.Errorf("failed to analyze schema: %w", err)
 	}
@@ -280,7 +284,7 @@ func runSplitExtract(cmd *cobra.Command, args []string) error {
 		schemaType = detectSchemaType(string(content), splitFile)
 	}
 
-	result, err := splitSchema(string(content), schemaType, splitFile, splitMinSize, splitSubjectPrefix)
+	result, err := splitSchema(string(content), schemaType, splitFile, splitMinSize, splitSubjectPrefix, splitDepth)
 	if err != nil {
 		return fmt.Errorf("failed to split schema: %w", err)
 	}
@@ -342,7 +346,7 @@ func runSplitRegister(cmd *cobra.Command, args []string) error {
 		schemaType = detectSchemaType(string(content), splitFile)
 	}
 
-	result, err := splitSchema(string(content), schemaType, splitFile, splitMinSize, splitSubjectPrefix)
+	result, err := splitSchema(string(content), schemaType, splitFile, splitMinSize, splitSubjectPrefix, splitDepth)
 	if err != nil {
 		return fmt.Errorf("failed to split schema: %w", err)
 	}
@@ -482,10 +486,10 @@ func runSplitRegister(cmd *cobra.Command, args []string) error {
 // Schema splitting logic
 // ========================
 
-func splitSchema(content, schemaType, filename string, minSize int, subjectPrefix string) (*SplitResult, error) {
+func splitSchema(content, schemaType, filename string, minSize int, subjectPrefix string, depth int) (*SplitResult, error) {
 	switch strings.ToUpper(schemaType) {
 	case "AVRO":
-		return splitAvroSchema(content, minSize, subjectPrefix)
+		return splitAvroSchema(content, minSize, subjectPrefix, depth)
 	case "PROTOBUF":
 		return splitProtobufSchema(content, filename, minSize, subjectPrefix)
 	case "JSON":
@@ -499,7 +503,7 @@ func splitSchema(content, schemaType, filename string, minSize int, subjectPrefi
 // Avro splitting
 // ========================
 
-func splitAvroSchema(content string, minSize int, subjectPrefix string) (*SplitResult, error) {
+func splitAvroSchema(content string, minSize int, subjectPrefix string, depth int) (*SplitResult, error) {
 	var schema interface{}
 	if err := json.Unmarshal([]byte(content), &schema); err != nil {
 		return nil, fmt.Errorf("failed to parse Avro schema: %w", err)
@@ -518,13 +522,20 @@ func splitAvroSchema(content string, minSize int, subjectPrefix string) (*SplitR
 	json.Unmarshal(copyBytes, &schemaCopy)
 	schemaCopyMap := schemaCopy.(map[string]interface{})
 
-	// Extract all named types (records, enums, fixed)
+	// Extract named types (records, enums, fixed)
 	extractedTypes := make(map[string]map[string]interface{})
 	typeDeps := make(map[string][]string)
 
-	// Walk the schema tree and extract named types
 	rootName := getAvroFullName(schemaCopyMap)
-	extractAvroNamedTypes(schemaCopyMap, "", extractedTypes, typeDeps)
+
+	if depth == 1 {
+		// Depth-limited extraction: only extract direct field types of the root record.
+		// Each extracted type keeps its internal nested types inline.
+		extractAvroTopLevelTypes(schemaCopyMap, extractedTypes, typeDeps)
+	} else {
+		// Full recursive extraction: extract every named type at all depths.
+		extractAvroNamedTypes(schemaCopyMap, "", extractedTypes, typeDeps)
+	}
 
 	if len(extractedTypes) <= 1 {
 		// Only the root type - nothing to split
@@ -675,6 +686,120 @@ func splitAvroSchema(content string, minSize int, subjectPrefix string) (*SplitR
 	}
 
 	return result, nil
+}
+
+// extractAvroTopLevelTypes extracts only the direct field types of the root record.
+// Each extracted type retains all its nested types inline — no recursive flattening.
+func extractAvroTopLevelTypes(rootSchema map[string]interface{}, extracted map[string]map[string]interface{}, deps map[string][]string) {
+	rootName := getAvroFullName(rootSchema)
+	namespace, _ := rootSchema["namespace"].(string)
+
+	fields, ok := rootSchema["fields"].([]interface{})
+	if !ok {
+		return
+	}
+
+	// Store the root with references replacing inline types
+	rootCopy := make(map[string]interface{})
+	for k, v := range rootSchema {
+		if k != "fields" {
+			rootCopy[k] = v
+		}
+	}
+
+	newFields := make([]interface{}, 0, len(fields))
+	for _, f := range fields {
+		field, ok := f.(map[string]interface{})
+		if !ok {
+			newFields = append(newFields, f)
+			continue
+		}
+
+		newField := make(map[string]interface{})
+		for k, v := range field {
+			newField[k] = v
+		}
+
+		fieldType := field["type"]
+		replaced, extractedType := extractTopLevelFieldType(fieldType, namespace)
+
+		if extractedType != nil {
+			typeName := getAvroFullName(extractedType)
+			if typeName != "" {
+				// Store the extracted type as-is (with all nested types inline)
+				extracted[typeName] = extractedType
+				deps[rootName] = appendUnique(deps[rootName], typeName)
+			}
+		}
+
+		newField["type"] = replaced
+		newFields = append(newFields, newField)
+	}
+
+	rootCopy["fields"] = newFields
+	extracted[rootName] = rootCopy
+}
+
+// extractTopLevelFieldType extracts an inline record/enum/fixed from a field type,
+// returning the replacement type (reference string) and the extracted type definition.
+// For unions, it extracts the non-null complex type.
+func extractTopLevelFieldType(fieldType interface{}, namespace string) (replacement interface{}, extractedType map[string]interface{}) {
+	switch ft := fieldType.(type) {
+	case string:
+		return ft, nil // primitive or already a reference
+	case map[string]interface{}:
+		typeName, _ := ft["type"].(string)
+		switch typeName {
+		case "record", "enum", "fixed":
+			fullName := getAvroFullName(ft)
+			return fullName, ft
+		case "array":
+			if items, ok := ft["items"].(map[string]interface{}); ok {
+				itemType, _ := items["type"].(string)
+				if itemType == "record" || itemType == "enum" || itemType == "fixed" {
+					fullName := getAvroFullName(items)
+					return map[string]interface{}{"type": "array", "items": fullName}, items
+				}
+			}
+			return ft, nil
+		default:
+			return ft, nil
+		}
+	case []interface{}:
+		// Union type — extract the non-null complex type
+		result := make([]interface{}, 0, len(ft))
+		for _, ut := range ft {
+			if utMap, ok := ut.(map[string]interface{}); ok {
+				typeName, _ := utMap["type"].(string)
+				switch typeName {
+				case "record", "enum", "fixed":
+					fullName := getAvroFullName(utMap)
+					result = append(result, fullName)
+					extractedType = utMap
+				case "array":
+					if items, ok := utMap["items"].(map[string]interface{}); ok {
+						itemType, _ := items["type"].(string)
+						if itemType == "record" || itemType == "enum" || itemType == "fixed" {
+							fullName := getAvroFullName(items)
+							result = append(result, map[string]interface{}{"type": "array", "items": fullName})
+							extractedType = items
+						} else {
+							result = append(result, ut)
+						}
+					} else {
+						result = append(result, ut)
+					}
+				default:
+					result = append(result, ut)
+				}
+			} else {
+				result = append(result, ut)
+			}
+		}
+		return result, extractedType
+	default:
+		return fieldType, nil
+	}
 }
 
 func getAvroFullName(schema map[string]interface{}) string {
