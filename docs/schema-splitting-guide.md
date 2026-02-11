@@ -454,6 +454,9 @@ srctl split analyze --file order.avsc
 # Analyze with size threshold (only extract types > 10KB)
 srctl split analyze --file order.avsc --min-size 10240
 
+# Top-level split only (extract direct field types, keep nesting intact)
+srctl split analyze --file order.avsc --depth 1
+
 # Analyze a Protobuf schema
 srctl split analyze --file order.proto --type PROTOBUF
 
@@ -475,6 +478,9 @@ srctl split extract --file order.avsc --output-dir ./split-schemas/
 srctl split extract --file order.avsc --output-dir ./split-schemas/ \
   --subject-prefix "com.example.types."
 
+# Top-level extraction only (fewer, larger sub-schemas)
+srctl split extract --file order.avsc --output-dir ./split-schemas/ --depth 1
+
 # Split a Protobuf schema
 srctl split extract --file order.proto --type PROTOBUF --output-dir ./split-schemas/
 ```
@@ -486,6 +492,9 @@ Split the schema and register all parts to Schema Registry in correct dependency
 ```bash
 # Split and register
 srctl split register --file order.avsc --subject orders-value
+
+# Top-level split and register (recommended for large schemas)
+srctl split register --file order.avsc --subject orders-value --depth 1
 
 # Dry run first
 srctl split register --file order.avsc --subject orders-value --dry-run
@@ -504,8 +513,42 @@ srctl split register --file order.proto --type PROTOBUF --subject orders-value
 | `--subject` | Subject name for the root schema (register subcommand) |
 | `--subject-prefix` | Prefix for extracted type subjects |
 | `--min-size` | Minimum type size in bytes to extract (default: 0 = extract all named types) |
+| `--depth` | Extraction depth: `0` = full recursive extraction of all named types (default), `1` = top-level fields only, keeping nested types inline. Currently Avro-only. |
 | `--dry-run` | Show what would happen without registering |
 | `--compatibility` | Set compatibility for extracted subjects (default: BACKWARD) |
+
+### Depth Control
+
+The `--depth` flag controls how aggressively nested types are extracted:
+
+- **`--depth 0`** (default) -- Full recursive extraction. Every named type (record, enum, fixed) at every nesting level is extracted into its own subject. This maximizes reuse and modularity but can produce a large number of subjects.
+
+- **`--depth 1`** -- Top-level only. Extracts only the direct field types of the root record. Each extracted type keeps all of its own nested types inline. This produces fewer, larger subjects that are easier to manage operationally.
+
+```
+Root schema
+  ├─ Field A → Customer record
+  │              └─ Nested → Address record
+  ├─ Field B → LineItem record
+  │              └─ Nested → Money record
+
+--depth 0: Extracts Root, Customer, Address, LineItem, Money → 5 subjects
+--depth 1: Extracts Root, Customer (with Address inline), LineItem (with Money inline) → 3 subjects
+```
+
+**When to use `--depth 1`:**
+
+- Very large schemas (e.g., 4MB+) with hundreds of nested types where `--depth 0` would create thousands of subjects
+- When operational simplicity is preferred over maximum type reuse
+- When nested types are not shared across other schemas
+
+**When to use `--depth 0`:**
+
+- Types at deeper nesting levels are shared across multiple schemas (e.g., Address, Money)
+- You want maximum granularity for independent versioning
+- The total number of extracted subjects is manageable
+
+**Note:** The `--depth` flag currently only affects Avro schemas. Protobuf and JSON Schema splitting are unaffected.
 
 ---
 
