@@ -360,14 +360,20 @@ For a comprehensive guide, see [docs/schema-splitting-guide.md](docs/schema-spli
 # Analyze a schema to see what can be extracted
 srctl split analyze --file order.avsc
 
-# Analyze with minimum size threshold
+# Analyze with minimum size threshold (only extract types > 10KB)
 srctl split analyze --file order.avsc --min-size 10240
+
+# Top-level split only (extract direct field types, keep nesting intact)
+srctl split analyze --file order.avsc --depth 1
 
 # Extract sub-schemas to a directory for review
 srctl split extract --file order.avsc --output-dir ./split-schemas/
 
 # Split and register directly to Schema Registry (in dependency order)
 srctl split register --file order.avsc --subject orders-value
+
+# Top-level split and register (recommended for large schemas)
+srctl split register --file order.avsc --subject orders-value --depth 1
 
 # Dry run -- see what would be registered without making changes
 srctl split register --file order.avsc --subject orders-value --dry-run
@@ -378,6 +384,10 @@ srctl split register --file order.proto --type PROTOBUF --subject orders-value
 # Split a JSON Schema
 srctl split register --file order.json --type JSON --subject orders-value
 ```
+
+**Split depth control:**
+- `--depth 0` (default) — extracts every named type recursively (can produce many small subjects)
+- `--depth 1` — extracts only top-level field types, keeping nested types inline (fewer, larger subjects)
 
 ### Schema Validation
 
