@@ -859,8 +859,14 @@ func cloneSchemasParallel(targetClient *client.SchemaRegistryClient, schemas []s
 					}
 				}
 
-				// Set subject mode if specified
-				if len(schemasForSubj) > 0 && schemasForSubj[0].Mode != "" {
+				// Set subject mode: when preserving IDs, force IMPORT mode at subject level.
+				// Confluent Cloud requires subject-level IMPORT mode in addition to the
+				// global IMPORT mode. Without this, GetSubjectMode(defaultToGlobal=true)
+				// returns the source's READWRITE mode which overrides the target's global
+				// IMPORT mode, causing "Subject X is not in import mode" errors.
+				if !cloneNoPreserveIDs {
+					targetClient.SetSubjectMode(subj, "IMPORT")
+				} else if len(schemasForSubj) > 0 && schemasForSubj[0].Mode != "" {
 					targetClient.SetSubjectMode(subj, schemasForSubj[0].Mode)
 				}
 
@@ -890,6 +896,11 @@ func cloneSchemasParallel(targetClient *client.SchemaRegistryClient, schemas []s
 						atomic.AddInt64(&clonedCount, 1)
 					}
 					bar.Add(1)
+				}
+
+				// Restore subject mode to READWRITE after registration
+				if !cloneNoPreserveIDs {
+					targetClient.SetSubjectMode(subj, "READWRITE")
 				}
 			}
 		}()
