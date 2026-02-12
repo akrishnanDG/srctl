@@ -17,6 +17,7 @@ type SchemaRegistryClient struct {
 	HTTPClient *http.Client
 	Auth       *AuthConfig
 	Context    string // Default context (empty for default context ".")
+	clusterID  string // Cached cluster ID for catalog API (e.g., "lsrc-9vr3jm")
 }
 
 // AuthConfig holds authentication configuration
@@ -92,6 +93,53 @@ func (c *SchemaRegistryClient) buildURL(path string) string {
 		return fmt.Sprintf("%s/contexts/%s%s", c.BaseURL, url.PathEscape(c.Context), path)
 	}
 	return c.BaseURL + path
+}
+
+// getClusterID discovers and caches the Schema Registry cluster ID (e.g., "lsrc-9vr3jm")
+// by querying the catalog API. This is needed for tag operations on Confluent Cloud.
+func (c *SchemaRegistryClient) getClusterID() string {
+	if c.clusterID != "" {
+		return c.clusterID
+	}
+
+	// Try to discover from catalog search
+	urlPath := fmt.Sprintf("%s/catalog/v1/search/basic?type=sr_schema&limit=1", c.BaseURL)
+	respBody, statusCode, err := c.doRequest("GET", urlPath, nil)
+	if err != nil || statusCode != http.StatusOK {
+		// Fallback: try to extract from URL (e.g., psrc-XXXXX -> lsrc-XXXXX)
+		return "lsrc"
+	}
+
+	var searchResult struct {
+		Entities []struct {
+			Attributes struct {
+				QualifiedName string `json:"qualifiedName"`
+			} `json:"attributes"`
+		} `json:"entities"`
+	}
+	if err := json.Unmarshal(respBody, &searchResult); err != nil || len(searchResult.Entities) == 0 {
+		return "lsrc"
+	}
+
+	// Extract cluster ID from qualifiedName like "lsrc-9vr3jm:.:100009"
+	qn := searchResult.Entities[0].Attributes.QualifiedName
+	parts := strings.SplitN(qn, ":", 2)
+	if len(parts) > 0 && strings.HasPrefix(parts[0], "lsrc") {
+		c.clusterID = parts[0]
+		return c.clusterID
+	}
+
+	return "lsrc"
+}
+
+// subjectQualifiedName returns the catalog-compatible qualified name for a subject
+func (c *SchemaRegistryClient) subjectQualifiedName(subject string) string {
+	return fmt.Sprintf("%s:.:%s", c.getClusterID(), subject)
+}
+
+// schemaQualifiedName returns the catalog-compatible qualified name for a schema by ID
+func (c *SchemaRegistryClient) schemaQualifiedName(schemaID int) string {
+	return fmt.Sprintf("%s:.:%d", c.getClusterID(), schemaID)
 }
 
 // doRequest performs an HTTP request with authentication
@@ -693,10 +741,17 @@ func (c *SchemaRegistryClient) DeleteTag(tagName string) error {
 	return nil
 }
 
-// GetSubjectTags returns tags assigned to a subject
+// GetSubjectTags returns tags assigned to a subject's latest schema.
+// On Confluent Cloud, tags are on sr_schema entities (by schema ID), not sr_subject.
 func (c *SchemaRegistryClient) GetSubjectTags(subject string) ([]TagAssignment, error) {
-	qualifiedName := fmt.Sprintf("lsrc:%s", subject)
-	urlPath := fmt.Sprintf("%s/catalog/v1/entity/type/sr_subject/name/%s/tags", c.BaseURL, url.PathEscape(qualifiedName))
+	// Get the latest schema ID for the subject
+	schema, err := c.GetSchema(subject, "latest")
+	if err != nil {
+		return []TagAssignment{}, nil
+	}
+
+	qualifiedName := c.schemaQualifiedName(schema.ID)
+	urlPath := fmt.Sprintf("%s/catalog/v1/entity/type/sr_schema/name/%s/tags", c.BaseURL, url.PathEscape(qualifiedName))
 
 	respBody, statusCode, err := c.doRequest("GET", urlPath, nil)
 	if err != nil {
@@ -719,13 +774,24 @@ func (c *SchemaRegistryClient) GetSubjectTags(subject string) ([]TagAssignment, 
 	return tags, nil
 }
 
-// AssignTagToSubject assigns a tag to a subject
+// AssignTagToSubject assigns a tag to a subject's latest schema.
+// On Confluent Cloud, tags are assigned to sr_schema entities (by schema ID).
 func (c *SchemaRegistryClient) AssignTagToSubject(subject, tagName string) error {
-	qualifiedName := fmt.Sprintf("lsrc:%s", subject)
-	urlPath := fmt.Sprintf("%s/catalog/v1/entity/type/sr_subject/name/%s/tags", c.BaseURL, url.PathEscape(qualifiedName))
+	// Get the latest schema ID for the subject
+	schema, err := c.GetSchema(subject, "latest")
+	if err != nil {
+		return fmt.Errorf("failed to get schema for subject %s: %w", subject, err)
+	}
+
+	qualifiedName := c.schemaQualifiedName(schema.ID)
+	urlPath := fmt.Sprintf("%s/catalog/v1/entity/tags", c.BaseURL)
 
 	body := []map[string]string{
-		{"typeName": tagName},
+		{
+			"entityName": qualifiedName,
+			"entityType": "sr_schema",
+			"typeName":   tagName,
+		},
 	}
 
 	respBody, statusCode, err := c.doRequest("POST", urlPath, body)
@@ -740,10 +806,14 @@ func (c *SchemaRegistryClient) AssignTagToSubject(subject, tagName string) error
 	return nil
 }
 
-// RemoveTagFromSubject removes a tag from a subject
+// RemoveTagFromSubject removes a tag from a subject's latest schema
 func (c *SchemaRegistryClient) RemoveTagFromSubject(subject, tagName string) error {
-	qualifiedName := fmt.Sprintf("lsrc:%s", subject)
-	urlPath := fmt.Sprintf("%s/catalog/v1/entity/type/sr_subject/name/%s/tags/%s", c.BaseURL, url.PathEscape(qualifiedName), url.PathEscape(tagName))
+	schema, err := c.GetSchema(subject, "latest")
+	if err != nil {
+		return fmt.Errorf("failed to get schema for subject %s: %w", subject, err)
+	}
+	qualifiedName := c.schemaQualifiedName(schema.ID)
+	urlPath := fmt.Sprintf("%s/catalog/v1/entity/type/sr_schema/name/%s/tags/%s", c.BaseURL, url.PathEscape(qualifiedName), url.PathEscape(tagName))
 
 	respBody, statusCode, err := c.doRequest("DELETE", urlPath, nil)
 	if err != nil {
@@ -759,7 +829,7 @@ func (c *SchemaRegistryClient) RemoveTagFromSubject(subject, tagName string) err
 
 // GetSchemaTags returns tags assigned to a specific schema version
 func (c *SchemaRegistryClient) GetSchemaTags(subject string, version int) ([]TagAssignment, error) {
-	qualifiedName := fmt.Sprintf("lsrc:%s:%d", subject, version)
+	qualifiedName := fmt.Sprintf("%s:.:%s:%d", c.getClusterID(), subject, version)
 	urlPath := fmt.Sprintf("%s/catalog/v1/entity/type/sr_schema/name/%s/tags", c.BaseURL, url.PathEscape(qualifiedName))
 
 	respBody, statusCode, err := c.doRequest("GET", urlPath, nil)
@@ -785,7 +855,7 @@ func (c *SchemaRegistryClient) GetSchemaTags(subject string, version int) ([]Tag
 
 // AssignTagToSchema assigns a tag to a specific schema version
 func (c *SchemaRegistryClient) AssignTagToSchema(subject string, version int, tagName string) error {
-	qualifiedName := fmt.Sprintf("lsrc:%s:%d", subject, version)
+	qualifiedName := fmt.Sprintf("%s:.:%s:%d", c.getClusterID(), subject, version)
 	urlPath := fmt.Sprintf("%s/catalog/v1/entity/type/sr_schema/name/%s/tags", c.BaseURL, url.PathEscape(qualifiedName))
 
 	body := []map[string]string{
@@ -806,7 +876,7 @@ func (c *SchemaRegistryClient) AssignTagToSchema(subject string, version int, ta
 
 // RemoveTagFromSchema removes a tag from a specific schema version
 func (c *SchemaRegistryClient) RemoveTagFromSchema(subject string, version int, tagName string) error {
-	qualifiedName := fmt.Sprintf("lsrc:%s:%d", subject, version)
+	qualifiedName := fmt.Sprintf("%s:.:%s:%d", c.getClusterID(), subject, version)
 	urlPath := fmt.Sprintf("%s/catalog/v1/entity/type/sr_schema/name/%s/tags/%s", c.BaseURL, url.PathEscape(qualifiedName), url.PathEscape(tagName))
 
 	respBody, statusCode, err := c.doRequest("DELETE", urlPath, nil)
