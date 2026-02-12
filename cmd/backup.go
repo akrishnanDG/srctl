@@ -101,14 +101,21 @@ type BackupManifest struct {
 
 // TagBackup contains tag definitions and assignments
 type TagBackup struct {
-	Definitions []client.Tag          `json:"definitions"`
-	Assignments []TagAssignmentBackup `json:"assignments"`
+	Definitions      []client.Tag          `json:"definitions"`
+	Assignments      []TagAssignmentBackup `json:"assignments"`
+	TopicAssignments []TopicTagBackup      `json:"topicAssignments,omitempty"`
 }
 
 // TagAssignmentBackup stores tag assignment for backup
 type TagAssignmentBackup struct {
 	Subject  string   `json:"subject"`
 	Version  int      `json:"version,omitempty"` // 0 means subject-level
+	TagNames []string `json:"tagNames"`
+}
+
+// TopicTagBackup stores tag assignment for a Kafka topic
+type TopicTagBackup struct {
+	Topic    string   `json:"topic"`
 	TagNames []string `json:"tagNames"`
 }
 
@@ -508,10 +515,38 @@ func backupTagsData(c *client.SchemaRegistryClient, subjects []string, backupDir
 	}
 	bar.Finish()
 
+	// Collect topic-level tags
+	// Extract unique topic names from subjects (strip -value/-key suffix)
+	topicSet := make(map[string]bool)
+	for _, subj := range subjects {
+		topic := subj
+		if strings.HasSuffix(topic, "-value") {
+			topic = strings.TrimSuffix(topic, "-value")
+		} else if strings.HasSuffix(topic, "-key") {
+			topic = strings.TrimSuffix(topic, "-key")
+		}
+		topicSet[topic] = true
+	}
+
+	for topic := range topicSet {
+		topicTags, err := c.GetTopicTags(topic)
+		if err == nil && len(topicTags) > 0 {
+			var tagNames []string
+			for _, t := range topicTags {
+				tagNames = append(tagNames, t.TypeName)
+			}
+			tagBackup.TopicAssignments = append(tagBackup.TopicAssignments, TopicTagBackup{
+				Topic:    topic,
+				TagNames: tagNames,
+			})
+		}
+	}
+
 	// Save tag backup
 	saveJSON(filepath.Join(backupDir, "tags.json"), tagBackup)
 
-	return len(tagBackup.Definitions), len(tagBackup.Assignments)
+	totalAssignments := len(tagBackup.Assignments) + len(tagBackup.TopicAssignments)
+	return len(tagBackup.Definitions), totalAssignments
 }
 
 func backupSubject(c *client.SchemaRegistryClient, subject string, byID bool) (*SubjectBackup, []IDMapping, error) {
@@ -995,19 +1030,29 @@ func restoreTagsData(c *client.SchemaRegistryClient, backupPath string) (defsRes
 		defsRestored++
 	}
 
-	// Restore tag assignments
+	// Restore tag assignments (schema-level)
 	for _, assign := range tagBackup.Assignments {
 		for _, tagName := range assign.TagNames {
 			var err error
 			if assign.Version == 0 {
-				// Subject-level tag
 				err = c.AssignTagToSubject(assign.Subject, tagName)
 			} else {
-				// Schema-level tag
 				err = c.AssignTagToSchema(assign.Subject, assign.Version, tagName)
 			}
 			if err != nil && !strings.Contains(err.Error(), "already") {
 				output.Warning("Failed to assign tag %s to %s: %v", tagName, assign.Subject, err)
+				continue
+			}
+			assignsRestored++
+		}
+	}
+
+	// Restore topic-level tag assignments
+	for _, topicAssign := range tagBackup.TopicAssignments {
+		for _, tagName := range topicAssign.TagNames {
+			err := c.AssignTagToTopic(topicAssign.Topic, tagName)
+			if err != nil && !strings.Contains(err.Error(), "already") {
+				output.Warning("Failed to assign tag %s to topic %s: %v", tagName, topicAssign.Topic, err)
 				continue
 			}
 			assignsRestored++

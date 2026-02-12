@@ -13,11 +13,12 @@ import (
 
 // SchemaRegistryClient is the main client for interacting with Schema Registry
 type SchemaRegistryClient struct {
-	BaseURL    string
-	HTTPClient *http.Client
-	Auth       *AuthConfig
-	Context    string // Default context (empty for default context ".")
-	clusterID  string // Cached cluster ID for catalog API (e.g., "lsrc-9vr3jm")
+	BaseURL        string
+	HTTPClient     *http.Client
+	Auth           *AuthConfig
+	Context        string // Default context (empty for default context ".")
+	clusterID      string // Cached SR cluster ID for catalog API (e.g., "lsrc-9vr3jm")
+	kafkaClusterID string // Cached Kafka cluster ID for topic tags (e.g., "lkc-x8z5gg")
 }
 
 // AuthConfig holds authentication configuration
@@ -140,6 +141,122 @@ func (c *SchemaRegistryClient) subjectQualifiedName(subject string) string {
 // schemaQualifiedName returns the catalog-compatible qualified name for a schema by ID
 func (c *SchemaRegistryClient) schemaQualifiedName(schemaID int) string {
 	return fmt.Sprintf("%s:.:%d", c.getClusterID(), schemaID)
+}
+
+// getKafkaClusterID discovers and caches the Kafka cluster ID (e.g., "lkc-x8z5gg")
+// by querying the catalog API for kafka_topic entities.
+func (c *SchemaRegistryClient) getKafkaClusterID() string {
+	if c.kafkaClusterID != "" {
+		return c.kafkaClusterID
+	}
+
+	urlPath := fmt.Sprintf("%s/catalog/v1/search/basic?type=kafka_topic&limit=1", c.BaseURL)
+	respBody, statusCode, err := c.doRequest("GET", urlPath, nil)
+	if err != nil || statusCode != http.StatusOK {
+		return ""
+	}
+
+	var searchResult struct {
+		Entities []struct {
+			Attributes struct {
+				QualifiedName string `json:"qualifiedName"`
+			} `json:"attributes"`
+		} `json:"entities"`
+	}
+	if err := json.Unmarshal(respBody, &searchResult); err != nil || len(searchResult.Entities) == 0 {
+		return ""
+	}
+
+	// Extract Kafka cluster ID from qualifiedName like "lsrc-9vr3jm:lkc-x8z5gg:topic-name"
+	qn := searchResult.Entities[0].Attributes.QualifiedName
+	parts := strings.Split(qn, ":")
+	for _, part := range parts {
+		if strings.HasPrefix(part, "lkc") {
+			c.kafkaClusterID = part
+			return c.kafkaClusterID
+		}
+	}
+
+	return ""
+}
+
+// topicQualifiedName returns the catalog-compatible qualified name for a Kafka topic.
+// Confluent Cloud format: lsrc-<sr-cluster>:lkc-<kafka-cluster>:<topic-name>
+func (c *SchemaRegistryClient) topicQualifiedName(topicName string) string {
+	srID := c.getClusterID()
+	kafkaID := c.getKafkaClusterID()
+	if kafkaID == "" {
+		return topicName
+	}
+	return fmt.Sprintf("%s:%s:%s", srID, kafkaID, topicName)
+}
+
+// GetTopicTags returns tags assigned to a Kafka topic
+func (c *SchemaRegistryClient) GetTopicTags(topicName string) ([]TagAssignment, error) {
+	qualifiedName := c.topicQualifiedName(topicName)
+	urlPath := fmt.Sprintf("%s/catalog/v1/entity/type/kafka_topic/name/%s/tags", c.BaseURL, url.PathEscape(qualifiedName))
+
+	respBody, statusCode, err := c.doRequest("GET", urlPath, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	if statusCode == http.StatusNotFound {
+		return []TagAssignment{}, nil
+	}
+
+	if statusCode != http.StatusOK {
+		return nil, fmt.Errorf("failed to get topic tags: %s (status %d)", string(respBody), statusCode)
+	}
+
+	var tags []TagAssignment
+	if err := json.Unmarshal(respBody, &tags); err != nil {
+		return nil, fmt.Errorf("failed to parse topic tags response: %w", err)
+	}
+
+	return tags, nil
+}
+
+// AssignTagToTopic assigns a tag to a Kafka topic
+func (c *SchemaRegistryClient) AssignTagToTopic(topicName, tagName string) error {
+	qualifiedName := c.topicQualifiedName(topicName)
+	urlPath := fmt.Sprintf("%s/catalog/v1/entity/tags", c.BaseURL)
+
+	body := []map[string]string{
+		{
+			"entityName": qualifiedName,
+			"entityType": "kafka_topic",
+			"typeName":   tagName,
+		},
+	}
+
+	respBody, statusCode, err := c.doRequest("POST", urlPath, body)
+	if err != nil {
+		return err
+	}
+
+	if statusCode != http.StatusOK && statusCode != http.StatusCreated {
+		return fmt.Errorf("failed to assign topic tag: %s (status %d)", string(respBody), statusCode)
+	}
+
+	return nil
+}
+
+// RemoveTagFromTopic removes a tag from a Kafka topic
+func (c *SchemaRegistryClient) RemoveTagFromTopic(topicName, tagName string) error {
+	qualifiedName := c.topicQualifiedName(topicName)
+	urlPath := fmt.Sprintf("%s/catalog/v1/entity/type/kafka_topic/name/%s/tags/%s", c.BaseURL, url.PathEscape(qualifiedName), url.PathEscape(tagName))
+
+	respBody, statusCode, err := c.doRequest("DELETE", urlPath, nil)
+	if err != nil {
+		return err
+	}
+
+	if statusCode != http.StatusOK && statusCode != http.StatusNoContent {
+		return fmt.Errorf("failed to remove topic tag: %s (status %d)", string(respBody), statusCode)
+	}
+
+	return nil
 }
 
 // doRequest performs an HTTP request with authentication
