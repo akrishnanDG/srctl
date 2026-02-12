@@ -568,6 +568,8 @@ func runClone(cmd *cobra.Command, args []string) error {
 				SchemaType: schemaType,
 				Schema:     schema.Schema,
 				References: schema.References,
+				Metadata:   schema.Metadata,
+				RuleSet:    schema.RuleSet,
 			})
 		}
 	}
@@ -687,6 +689,8 @@ type schemaToClone struct {
 	SchemaType  string
 	Schema      string
 	References  []client.SchemaReference
+	Metadata    *client.SchemaMetadata
+	RuleSet     *client.SchemaRuleSet
 	ConfigLevel string
 	Mode        string
 }
@@ -768,6 +772,8 @@ func collectSchemasParallel(
 						SchemaType:  schemaType,
 						Schema:      schema.Schema,
 						References:  schema.References,
+						Metadata:    schema.Metadata,
+						RuleSet:     schema.RuleSet,
 						ConfigLevel: configLevel,
 						Mode:        mode,
 					})
@@ -876,6 +882,8 @@ func cloneSchemasParallel(targetClient *client.SchemaRegistryClient, schemas []s
 						Schema:     s.Schema,
 						SchemaType: s.SchemaType,
 						References: s.References,
+						Metadata:   s.Metadata,
+						RuleSet:    s.RuleSet,
 					}
 
 					// If preserving IDs, we need to use the register with ID

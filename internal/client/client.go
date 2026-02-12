@@ -34,7 +34,37 @@ type Schema struct {
 	SchemaType string            `json:"schemaType,omitempty"`
 	Schema     string            `json:"schema"`
 	References []SchemaReference `json:"references,omitempty"`
+	Metadata   *SchemaMetadata   `json:"metadata,omitempty"`
+	RuleSet    *SchemaRuleSet    `json:"ruleSet,omitempty"`
 	Deleted    bool              `json:"deleted,omitempty"`
+}
+
+// SchemaMetadata represents data contract metadata
+type SchemaMetadata struct {
+	Tags       map[string][]string `json:"tags,omitempty"`
+	Properties map[string]string   `json:"properties,omitempty"`
+	Sensitive  []string            `json:"sensitive,omitempty"`
+}
+
+// SchemaRuleSet represents data contract rules
+type SchemaRuleSet struct {
+	MigrationRules []SchemaRule `json:"migrationRules,omitempty"`
+	DomainRules    []SchemaRule `json:"domainRules,omitempty"`
+}
+
+// SchemaRule represents a single data contract rule
+type SchemaRule struct {
+	Name     string            `json:"name,omitempty"`
+	Doc      string            `json:"doc,omitempty"`
+	Kind     string            `json:"kind,omitempty"`
+	Mode     string            `json:"mode,omitempty"`
+	Type     string            `json:"type,omitempty"`
+	Tags     []string          `json:"tags,omitempty"`
+	Params   map[string]string `json:"params,omitempty"`
+	Expr     string            `json:"expr,omitempty"`
+	OnSuccess string           `json:"onSuccess,omitempty"`
+	OnFailure string           `json:"onFailure,omitempty"`
+	Disabled bool              `json:"disabled,omitempty"`
 }
 
 // SchemaReference represents a reference to another schema
@@ -308,6 +338,12 @@ func (c *SchemaRegistryClient) RegisterSchema(subject string, schema *Schema) (i
 	}
 	if len(schema.References) > 0 {
 		reqBody["references"] = schema.References
+	}
+	if schema.Metadata != nil {
+		reqBody["metadata"] = schema.Metadata
+	}
+	if schema.RuleSet != nil {
+		reqBody["ruleSet"] = schema.RuleSet
 	}
 	// Include ID for IMPORT mode (requires registry to be in IMPORT mode)
 	if schema.ID > 0 {

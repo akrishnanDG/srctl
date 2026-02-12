@@ -127,6 +127,8 @@ type SchemaVersionBackup struct {
 	SchemaType string                   `json:"schemaType"`
 	Schema     string                   `json:"schema"`
 	References []client.SchemaReference `json:"references,omitempty"`
+	Metadata   *client.SchemaMetadata   `json:"metadata,omitempty"`
+	RuleSet    *client.SchemaRuleSet    `json:"ruleSet,omitempty"`
 }
 
 // IDMapping maps schema IDs to subjects/versions for restoration
@@ -558,6 +560,8 @@ func backupSubject(c *client.SchemaRegistryClient, subject string, byID bool) (*
 			SchemaType: schemaType,
 			Schema:     schema.Schema,
 			References: schema.References,
+			Metadata:   schema.Metadata,
+			RuleSet:    schema.RuleSet,
 		})
 
 		if byID {
@@ -789,6 +793,8 @@ func runRestore(cmd *cobra.Command, args []string) error {
 				Schema:     ver.Schema,
 				SchemaType: ver.SchemaType,
 				References: ver.References,
+				Metadata:   ver.Metadata,
+				RuleSet:    ver.RuleSet,
 			}
 			// Include schema ID if preserving IDs
 			if restorePreserveID {
