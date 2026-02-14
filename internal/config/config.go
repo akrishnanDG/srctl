@@ -8,14 +8,35 @@ import (
 	"github.com/spf13/viper"
 )
 
+// KafkaSASLConfig holds SASL authentication for Kafka
+type KafkaSASLConfig struct {
+	Mechanism string `mapstructure:"mechanism"` // PLAIN, SCRAM-SHA-256, SCRAM-SHA-512
+	Username  string `mapstructure:"username"`
+	Password  string `mapstructure:"password"`
+}
+
+// KafkaTLSConfig holds TLS settings for Kafka
+type KafkaTLSConfig struct {
+	Enabled    bool `mapstructure:"enabled"`
+	SkipVerify bool `mapstructure:"skip_verify"`
+}
+
+// KafkaConfig holds Kafka connection settings for a registry
+type KafkaConfig struct {
+	Brokers []string        `mapstructure:"brokers"`
+	SASL    KafkaSASLConfig `mapstructure:"sasl"`
+	TLS     KafkaTLSConfig  `mapstructure:"tls"`
+}
+
 // Registry represents a configured schema registry
 type Registry struct {
-	Name     string `mapstructure:"name"`
-	URL      string `mapstructure:"url"`
-	Username string `mapstructure:"username"`
-	Password string `mapstructure:"password"`
-	Context  string `mapstructure:"context"`
-	Default  bool   `mapstructure:"default"`
+	Name     string      `mapstructure:"name"`
+	URL      string      `mapstructure:"url"`
+	Username string      `mapstructure:"username"`
+	Password string      `mapstructure:"password"`
+	Context  string      `mapstructure:"context"`
+	Default  bool        `mapstructure:"default"`
+	Kafka    KafkaConfig `mapstructure:"kafka"`
 }
 
 // Config represents the application configuration

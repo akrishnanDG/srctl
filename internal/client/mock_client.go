@@ -94,7 +94,7 @@ func (m *MockSchemaRegistryClient) GetCallCount(method string) int {
 func (m *MockSchemaRegistryClient) GetContexts() ([]string, error) {
 	m.RecordCall("GetContexts")
 	if m.ShouldError {
-		return nil, fmt.Errorf(m.ErrorMessage)
+		return nil, fmt.Errorf("%s", m.ErrorMessage)
 	}
 	return m.Contexts, nil
 }
@@ -105,7 +105,7 @@ func (m *MockSchemaRegistryClient) GetSubjects(includeDeleted bool) ([]string, e
 		return nil, m.GetSubjectsError
 	}
 	if m.ShouldError {
-		return nil, fmt.Errorf(m.ErrorMessage)
+		return nil, fmt.Errorf("%s", m.ErrorMessage)
 	}
 
 	m.mu.RLock()
@@ -124,7 +124,7 @@ func (m *MockSchemaRegistryClient) GetVersions(subject string, includeDeleted bo
 		return nil, m.GetVersionsError
 	}
 	if m.ShouldError {
-		return nil, fmt.Errorf(m.ErrorMessage)
+		return nil, fmt.Errorf("%s", m.ErrorMessage)
 	}
 
 	m.mu.RLock()
@@ -148,7 +148,7 @@ func (m *MockSchemaRegistryClient) GetSchema(subject string, version string) (*S
 		return nil, m.GetSchemaError
 	}
 	if m.ShouldError {
-		return nil, fmt.Errorf(m.ErrorMessage)
+		return nil, fmt.Errorf("%s", m.ErrorMessage)
 	}
 
 	m.mu.RLock()
@@ -186,7 +186,7 @@ func (m *MockSchemaRegistryClient) GetSchemaWithDeleted(subject string, version 
 func (m *MockSchemaRegistryClient) GetSchemaByID(id int) (*Schema, error) {
 	m.RecordCall("GetSchemaByID", id)
 	if m.ShouldError {
-		return nil, fmt.Errorf(m.ErrorMessage)
+		return nil, fmt.Errorf("%s", m.ErrorMessage)
 	}
 
 	m.mu.RLock()
@@ -206,7 +206,7 @@ func (m *MockSchemaRegistryClient) GetSchemaByID(id int) (*Schema, error) {
 func (m *MockSchemaRegistryClient) GetSchemaReferencedBy(subject string, version int) ([]int, error) {
 	m.RecordCall("GetSchemaReferencedBy", subject, version)
 	if m.ShouldError {
-		return nil, fmt.Errorf(m.ErrorMessage)
+		return nil, fmt.Errorf("%s", m.ErrorMessage)
 	}
 	// By default, return empty (no references)
 	return []int{}, nil
@@ -215,7 +215,7 @@ func (m *MockSchemaRegistryClient) GetSchemaReferencedBy(subject string, version
 func (m *MockSchemaRegistryClient) GetSchemaSubjectVersionsByID(id int) ([]SubjectVersion, error) {
 	m.RecordCall("GetSchemaSubjectVersionsByID", id)
 	if m.ShouldError {
-		return nil, fmt.Errorf(m.ErrorMessage)
+		return nil, fmt.Errorf("%s", m.ErrorMessage)
 	}
 
 	m.mu.RLock()
@@ -238,7 +238,7 @@ func (m *MockSchemaRegistryClient) RegisterSchema(subject string, schema *Schema
 		return 0, m.RegisterError
 	}
 	if m.ShouldError {
-		return 0, fmt.Errorf(m.ErrorMessage)
+		return 0, fmt.Errorf("%s", m.ErrorMessage)
 	}
 
 	m.mu.Lock()
@@ -278,7 +278,7 @@ func (m *MockSchemaRegistryClient) DeleteSubject(subject string, permanent bool)
 		return nil, m.DeleteError
 	}
 	if m.ShouldError {
-		return nil, fmt.Errorf(m.ErrorMessage)
+		return nil, fmt.Errorf("%s", m.ErrorMessage)
 	}
 
 	m.mu.Lock()
@@ -307,7 +307,7 @@ func (m *MockSchemaRegistryClient) DeleteVersion(subject string, version string,
 		return 0, m.DeleteError
 	}
 	if m.ShouldError {
-		return 0, fmt.Errorf(m.ErrorMessage)
+		return 0, fmt.Errorf("%s", m.ErrorMessage)
 	}
 
 	m.mu.Lock()
@@ -339,7 +339,7 @@ func (m *MockSchemaRegistryClient) GetConfig() (*Config, error) {
 		return nil, m.ConfigError
 	}
 	if m.ShouldError {
-		return nil, fmt.Errorf(m.ErrorMessage)
+		return nil, fmt.Errorf("%s", m.ErrorMessage)
 	}
 	return m.GlobalConfig, nil
 }
@@ -350,7 +350,7 @@ func (m *MockSchemaRegistryClient) GetSubjectConfig(subject string, defaultToGlo
 		return nil, m.ConfigError
 	}
 	if m.ShouldError {
-		return nil, fmt.Errorf(m.ErrorMessage)
+		return nil, fmt.Errorf("%s", m.ErrorMessage)
 	}
 
 	m.mu.RLock()
@@ -371,7 +371,7 @@ func (m *MockSchemaRegistryClient) SetConfig(compatibility string) error {
 		return m.ConfigError
 	}
 	if m.ShouldError {
-		return fmt.Errorf(m.ErrorMessage)
+		return fmt.Errorf("%s", m.ErrorMessage)
 	}
 
 	m.mu.Lock()
@@ -386,7 +386,7 @@ func (m *MockSchemaRegistryClient) SetSubjectConfig(subject string, compatibilit
 		return m.ConfigError
 	}
 	if m.ShouldError {
-		return fmt.Errorf(m.ErrorMessage)
+		return fmt.Errorf("%s", m.ErrorMessage)
 	}
 
 	m.mu.Lock()
@@ -401,7 +401,7 @@ func (m *MockSchemaRegistryClient) GetMode() (*Mode, error) {
 		return nil, m.ModeError
 	}
 	if m.ShouldError {
-		return nil, fmt.Errorf(m.ErrorMessage)
+		return nil, fmt.Errorf("%s", m.ErrorMessage)
 	}
 	return m.GlobalMode, nil
 }
@@ -412,7 +412,7 @@ func (m *MockSchemaRegistryClient) GetSubjectMode(subject string, defaultToGloba
 		return nil, m.ModeError
 	}
 	if m.ShouldError {
-		return nil, fmt.Errorf(m.ErrorMessage)
+		return nil, fmt.Errorf("%s", m.ErrorMessage)
 	}
 
 	m.mu.RLock()
@@ -433,7 +433,7 @@ func (m *MockSchemaRegistryClient) SetMode(mode string) error {
 		return m.ModeError
 	}
 	if m.ShouldError {
-		return fmt.Errorf(m.ErrorMessage)
+		return fmt.Errorf("%s", m.ErrorMessage)
 	}
 
 	m.mu.Lock()
@@ -448,7 +448,7 @@ func (m *MockSchemaRegistryClient) SetSubjectMode(subject string, mode string) e
 		return m.ModeError
 	}
 	if m.ShouldError {
-		return fmt.Errorf(m.ErrorMessage)
+		return fmt.Errorf("%s", m.ErrorMessage)
 	}
 
 	m.mu.Lock()
@@ -460,7 +460,7 @@ func (m *MockSchemaRegistryClient) SetSubjectMode(subject string, mode string) e
 func (m *MockSchemaRegistryClient) CheckCompatibility(subject string, schema *Schema, version string) (bool, error) {
 	m.RecordCall("CheckCompatibility", subject, schema, version)
 	if m.ShouldError {
-		return false, fmt.Errorf(m.ErrorMessage)
+		return false, fmt.Errorf("%s", m.ErrorMessage)
 	}
 	return true, nil
 }
@@ -468,7 +468,7 @@ func (m *MockSchemaRegistryClient) CheckCompatibility(subject string, schema *Sc
 func (m *MockSchemaRegistryClient) GetAllSchemas(includeDeleted bool) ([]Schema, error) {
 	m.RecordCall("GetAllSchemas", includeDeleted)
 	if m.ShouldError {
-		return nil, fmt.Errorf(m.ErrorMessage)
+		return nil, fmt.Errorf("%s", m.ErrorMessage)
 	}
 
 	m.mu.RLock()
@@ -484,7 +484,7 @@ func (m *MockSchemaRegistryClient) GetAllSchemas(includeDeleted bool) ([]Schema,
 func (m *MockSchemaRegistryClient) GetSchemaTypes() ([]string, error) {
 	m.RecordCall("GetSchemaTypes")
 	if m.ShouldError {
-		return nil, fmt.Errorf(m.ErrorMessage)
+		return nil, fmt.Errorf("%s", m.ErrorMessage)
 	}
 	return []string{"AVRO", "PROTOBUF", "JSON"}, nil
 }
@@ -493,7 +493,7 @@ func (m *MockSchemaRegistryClient) GetSchemaTypes() ([]string, error) {
 func (m *MockSchemaRegistryClient) GetTags() ([]Tag, error) {
 	m.RecordCall("GetTags")
 	if m.ShouldError {
-		return nil, fmt.Errorf(m.ErrorMessage)
+		return nil, fmt.Errorf("%s", m.ErrorMessage)
 	}
 	return m.Tags, nil
 }
@@ -501,7 +501,7 @@ func (m *MockSchemaRegistryClient) GetTags() ([]Tag, error) {
 func (m *MockSchemaRegistryClient) CreateTag(tag *Tag) error {
 	m.RecordCall("CreateTag", tag)
 	if m.ShouldError {
-		return fmt.Errorf(m.ErrorMessage)
+		return fmt.Errorf("%s", m.ErrorMessage)
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -512,7 +512,7 @@ func (m *MockSchemaRegistryClient) CreateTag(tag *Tag) error {
 func (m *MockSchemaRegistryClient) DeleteTag(tagName string) error {
 	m.RecordCall("DeleteTag", tagName)
 	if m.ShouldError {
-		return fmt.Errorf(m.ErrorMessage)
+		return fmt.Errorf("%s", m.ErrorMessage)
 	}
 	return nil
 }
@@ -520,7 +520,7 @@ func (m *MockSchemaRegistryClient) DeleteTag(tagName string) error {
 func (m *MockSchemaRegistryClient) GetSubjectTags(subject string) ([]TagAssignment, error) {
 	m.RecordCall("GetSubjectTags", subject)
 	if m.ShouldError {
-		return nil, fmt.Errorf(m.ErrorMessage)
+		return nil, fmt.Errorf("%s", m.ErrorMessage)
 	}
 
 	m.mu.RLock()
@@ -535,7 +535,7 @@ func (m *MockSchemaRegistryClient) GetSubjectTags(subject string) ([]TagAssignme
 func (m *MockSchemaRegistryClient) AssignTagToSubject(subject, tagName string) error {
 	m.RecordCall("AssignTagToSubject", subject, tagName)
 	if m.ShouldError {
-		return fmt.Errorf(m.ErrorMessage)
+		return fmt.Errorf("%s", m.ErrorMessage)
 	}
 	return nil
 }
@@ -543,7 +543,7 @@ func (m *MockSchemaRegistryClient) AssignTagToSubject(subject, tagName string) e
 func (m *MockSchemaRegistryClient) RemoveTagFromSubject(subject, tagName string) error {
 	m.RecordCall("RemoveTagFromSubject", subject, tagName)
 	if m.ShouldError {
-		return fmt.Errorf(m.ErrorMessage)
+		return fmt.Errorf("%s", m.ErrorMessage)
 	}
 	return nil
 }
@@ -551,7 +551,7 @@ func (m *MockSchemaRegistryClient) RemoveTagFromSubject(subject, tagName string)
 func (m *MockSchemaRegistryClient) GetSchemaTags(subject string, version int) ([]TagAssignment, error) {
 	m.RecordCall("GetSchemaTags", subject, version)
 	if m.ShouldError {
-		return nil, fmt.Errorf(m.ErrorMessage)
+		return nil, fmt.Errorf("%s", m.ErrorMessage)
 	}
 
 	key := fmt.Sprintf("%s:%d", subject, version)
@@ -567,7 +567,7 @@ func (m *MockSchemaRegistryClient) GetSchemaTags(subject string, version int) ([
 func (m *MockSchemaRegistryClient) AssignTagToSchema(subject string, version int, tagName string) error {
 	m.RecordCall("AssignTagToSchema", subject, version, tagName)
 	if m.ShouldError {
-		return fmt.Errorf(m.ErrorMessage)
+		return fmt.Errorf("%s", m.ErrorMessage)
 	}
 	return nil
 }
@@ -575,7 +575,7 @@ func (m *MockSchemaRegistryClient) AssignTagToSchema(subject string, version int
 func (m *MockSchemaRegistryClient) RemoveTagFromSchema(subject string, version int, tagName string) error {
 	m.RecordCall("RemoveTagFromSchema", subject, version, tagName)
 	if m.ShouldError {
-		return fmt.Errorf(m.ErrorMessage)
+		return fmt.Errorf("%s", m.ErrorMessage)
 	}
 	return nil
 }
@@ -587,7 +587,7 @@ func (m *MockSchemaRegistryClient) WithContext(ctx string) *MockSchemaRegistryCl
 
 // NewError creates a new error for testing
 func NewError(msg string) error {
-	return fmt.Errorf(msg)
+	return fmt.Errorf("%s", msg)
 }
 
 // ErrSubjectNotFound is a common error for testing

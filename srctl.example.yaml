@@ -13,8 +13,19 @@ registries:
     # https://confluent.cloud > Environment > Schema Registry > API credentials
 
   # Local development (Confluent Platform or community)
+  # Includes Kafka config for 'srctl replicate' command
   - name: local
     url: http://localhost:8081
+    kafka:
+      brokers:
+        - localhost:9092
+      # sasl:
+      #   mechanism: PLAIN           # PLAIN, SCRAM-SHA-256, SCRAM-SHA-512
+      #   username: kafka-user
+      #   password: kafka-pass
+      # tls:
+      #   enabled: true
+      #   skip_verify: false
 
   # Development environment
   - name: dev

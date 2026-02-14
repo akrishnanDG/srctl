@@ -37,6 +37,7 @@ A powerful CLI tool for Confluent Schema Registry that provides advanced capabil
 ### Cross-Registry Operations
 - **compare** - Compare schemas across registries with multi-threading
 - **clone** - Clone schemas between registries (preserves schema IDs by default)
+- **replicate** - Continuously replicate schemas in real-time by consuming the `_schemas` Kafka topic
 
 ### Data Contracts
 - **contract** - Manage data contract rules (get, set, validate)
@@ -105,19 +106,27 @@ registries:
     password: YOUR_API_SECRET
     default: true
 
-  # Development environment
-  - name: dev
-    url: https://dev-sr.example.com
-    username: DEV_API_KEY
-    password: DEV_API_SECRET
-    context: .dev
+  # On-prem / Community with Kafka config (for 'srctl replicate')
+  - name: on-prem
+    url: https://sr.internal:8081
+    username: SR_USER
+    password: SR_PASS
+    kafka:
+      brokers:
+        - broker1:9092
+        - broker2:9092
+      sasl:
+        mechanism: PLAIN
+        username: kafka-user
+        password: kafka-pass
+      tls:
+        enabled: true
 
-  # Production environment
-  - name: prod
-    url: https://prod-sr.example.com
-    username: PROD_API_KEY
-    password: PROD_API_SECRET
-    context: .production
+  # Confluent Cloud (target for replication)
+  - name: ccloud
+    url: https://psrc-xxxxx.confluent.cloud
+    username: CCLOUD_API_KEY
+    password: CCLOUD_API_SECRET
 
 # Default output format
 default_output: table
@@ -323,6 +332,89 @@ srctl restore ./backup/sr-backup-20240115 --subjects user-events
 - Restore automatically sorts schemas by dependencies to ensure correct registration order
 - `--preserve-ids` requires the backup to be created with `--by-id` and sets the registry to IMPORT mode
 - Schema **version numbers may differ** after restore - Schema Registry assigns versions sequentially, so if you backup v1, v3, v5 (with v2, v4 deleted), restore creates v1, v2, v3
+
+### Continuous Replication
+
+Continuously replicate schema changes from a source registry (on-prem, community, or CP) to a target registry (CP Enterprise or Confluent Cloud) in real-time. Consumes the source cluster's `_schemas` Kafka topic to detect every change as it happens.
+
+For a comprehensive guide covering setup, monitoring, alerting, production deployment (systemd/Docker/Kubernetes), and retry behavior, see [docs/continuous-replication-guide.md](docs/continuous-replication-guide.md).
+
+```bash
+# Basic replication (Kafka config from srctl.yaml)
+srctl replicate --source on-prem --target ccloud
+
+# With explicit Kafka brokers
+srctl replicate --source on-prem --target ccloud --kafka-brokers broker1:9092,broker2:9092
+
+# With SASL/TLS authentication
+srctl replicate --source on-prem --target ccloud \
+  --kafka-brokers broker1:9092 \
+  --kafka-sasl-mechanism PLAIN \
+  --kafka-sasl-user <user> \
+  --kafka-sasl-password <pass> \
+  --kafka-tls
+
+# With subject filtering
+srctl replicate --source on-prem --target ccloud \
+  --kafka-brokers broker1:9092 \
+  --filter "user-*"
+
+# With Prometheus metrics endpoint
+srctl replicate --source on-prem --target ccloud \
+  --kafka-brokers broker1:9092 \
+  --metrics-port 9090
+
+# Resume after restart (consumer group tracks offsets)
+srctl replicate --source on-prem --target ccloud \
+  --kafka-brokers broker1:9092 \
+  --no-initial-sync
+
+# Without schema ID preservation
+srctl replicate --source on-prem --target ccloud \
+  --kafka-brokers broker1:9092 \
+  --no-preserve-ids
+```
+
+**How it works:**
+
+1. **Initial sync** — On first run, performs a full clone from source to target (like `srctl clone`)
+2. **Streaming** — Consumes the `_schemas` Kafka topic for real-time change detection
+3. **Apply** — Registers new schemas, replicates config/mode changes, and handles deletes on the target via REST API
+4. **Resume** — Kafka consumer group offsets are committed, so restarts pick up where they left off
+
+**What gets replicated:**
+
+| Event | Action |
+|-------|--------|
+| New schema / version | Registered on target |
+| Compatibility config change | Applied to target (global & subject-level) |
+| Subject mode change | Applied to target (subject-level only) |
+| Subject deletion | Deleted on target |
+
+**Monitoring:**
+
+- **CLI status** — Periodic one-line status printed to terminal (configurable with `--status-interval`)
+- **Prometheus** — Optional `/metrics` HTTP endpoint (enabled with `--metrics-port`)
+
+Available Prometheus metrics:
+```
+srctl_replicate_schemas_total
+srctl_replicate_configs_total
+srctl_replicate_deletes_total
+srctl_replicate_errors_total
+srctl_replicate_events_processed_total
+srctl_replicate_events_filtered_total
+srctl_replicate_last_offset
+srctl_replicate_uptime_seconds
+```
+
+**Kafka authentication:**
+
+Kafka connection can be configured via CLI flags or in `srctl.yaml` under the source registry's `kafka` block. CLI flags override config file values. Supported SASL mechanisms: `PLAIN`, `SCRAM-SHA-256`, `SCRAM-SHA-512`.
+
+**Graceful shutdown:**
+
+Send `SIGINT` (Ctrl+C) or `SIGTERM` to stop. The replicator commits offsets, restores target registry mode, and prints a final stats table. A second signal forces immediate exit.
 
 ### Compare Operations
 
