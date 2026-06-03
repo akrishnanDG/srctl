@@ -241,12 +241,19 @@ func deleteSubject(c *client.SchemaRegistryClient, subject string) error {
 	return nil
 }
 
-func forceDeleteSubject(c interface {
-	GetVersions(string, bool) ([]int, error)
-	DeleteVersion(string, string, bool) (int, error)
-	DeleteSubject(string, bool) ([]int, error)
-}, subject string) error {
+func forceDeleteSubject(c *client.SchemaRegistryClient, subject string) error {
 	output.Header("Force Delete Subject: %s", subject)
+
+	// Check referential integrity for all versions before irreversible delete
+	refsByVersion, err := checkSubjectReferentialIntegrity(c, subject)
+	if err == nil && len(refsByVersion) > 0 {
+		output.Error("Cannot delete: subject has versions referenced by other schemas")
+		for v, refs := range refsByVersion {
+			output.Info("  Version %d is referenced by schema IDs: %v", v, refs)
+		}
+		output.Info("Use --skip-ref-check to bypass this check (not recommended)")
+		return fmt.Errorf("referential integrity violation")
+	}
 
 	if !deleteYes && !confirmAction(fmt.Sprintf("PERMANENTLY delete ALL versions of %s? This cannot be undone!", subject)) {
 		output.Info("Cancelled")
@@ -281,10 +288,7 @@ func forceDeleteSubject(c interface {
 	return nil
 }
 
-func keepLatestVersions(c interface {
-	GetVersions(string, bool) ([]int, error)
-	DeleteVersion(string, string, bool) (int, error)
-}, subject string, keepN int) error {
+func keepLatestVersions(c *client.SchemaRegistryClient, subject string, keepN int) error {
 	output.Header("Keep Latest %d Versions: %s", keepN, subject)
 
 	// Get all versions
@@ -326,6 +330,14 @@ func keepLatestVersions(c interface {
 
 	var deleted, failed int
 	for _, v := range toDelete {
+		// Check referential integrity before irreversible delete
+		if refs, refErr := checkReferentialIntegrity(c, subject, v); refErr == nil && len(refs) > 0 {
+			output.Error("Cannot delete version %d: referenced by schema IDs: %v (use --skip-ref-check to bypass)", v, refs)
+			failed++
+			bar.Add(1)
+			continue
+		}
+
 		// Soft delete first
 		_, err := c.DeleteVersion(subject, strconv.Itoa(v), false)
 		if err != nil && !strings.Contains(err.Error(), "already deleted") {
@@ -640,6 +652,16 @@ func checkSubjectReferentialIntegrity(c *client.SchemaRegistryClient, subject st
 func forceDeleteVersion(c *client.SchemaRegistryClient, subject, version string) error {
 	output.Header("Force Delete Version: %s v%s", subject, version)
 
+	// Check referential integrity before irreversible delete
+	v, _ := strconv.Atoi(version)
+	refs, err := checkReferentialIntegrity(c, subject, v)
+	if err == nil && len(refs) > 0 {
+		output.Error("Cannot delete: version %s is referenced by %d other schema(s)", version, len(refs))
+		output.Info("Referenced by schema IDs: %v", refs)
+		output.Info("Use --skip-ref-check to bypass this check (not recommended)")
+		return fmt.Errorf("referential integrity violation")
+	}
+
 	if !deleteYes && !confirmAction(fmt.Sprintf("PERMANENTLY delete version %s of %s? This cannot be undone!", version, subject)) {
 		output.Info("Cancelled")
 		return nil
@@ -647,7 +669,7 @@ func forceDeleteVersion(c *client.SchemaRegistryClient, subject, version string)
 
 	// Step 1: Soft delete
 	output.Step("Step 1/2: Soft deleting version...")
-	_, err := c.DeleteVersion(subject, version, false)
+	_, err = c.DeleteVersion(subject, version, false)
 	if err != nil && !strings.Contains(err.Error(), "already deleted") {
 		output.Warning("Soft delete warning: %v", err)
 	}
@@ -695,13 +717,25 @@ func deleteSubjectsParallel(c *client.SchemaRegistryClient, subjects []string) e
 	)
 
 	// Start workers
+	workers := clampWorkers(deleteWorkers)
 	var wg sync.WaitGroup
-	for i := 0; i < deleteWorkers; i++ {
+	for i := 0; i < workers; i++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
 			for subj := range jobs {
 				result := deleteResult{Subject: subj}
+
+				// Check referential integrity before irreversible delete
+				if refsByVersion, refErr := checkSubjectReferentialIntegrity(c, subj); refErr == nil && len(refsByVersion) > 0 {
+					result.Error = fmt.Errorf("referential integrity violation: subject has versions referenced by other schemas (use --skip-ref-check to bypass)")
+					results <- result
+					bar.Add(1)
+					if deleteForce || deletePermanent {
+						bar.Add(1) // Skip hard delete progress
+					}
+					continue
+				}
 
 				// Soft delete
 				versions, err := c.DeleteSubject(subj, false)
@@ -874,11 +908,11 @@ func forceDeleteAllParallel(c *client.SchemaRegistryClient) error {
 	}
 
 	// Phase 1: Soft delete all
-	output.Step("Step 3/5: Soft deleting all subjects (%d workers)...", deleteWorkers)
+	output.Step("Step 3/5: Soft deleting all subjects (%d workers)...", clampWorkers(deleteWorkers))
 	softDeleteParallel(c, subjects)
 
 	// Phase 2: Hard delete all
-	output.Step("Step 4/5: Permanently deleting all subjects (%d workers)...", deleteWorkers)
+	output.Step("Step 4/5: Permanently deleting all subjects (%d workers)...", clampWorkers(deleteWorkers))
 	totalVersions, failedCount := hardDeleteParallel(c, subjects)
 
 	// Summary
@@ -901,7 +935,8 @@ func softDeleteParallel(c *client.SchemaRegistryClient, subjects []string) {
 		progressbar.OptionClearOnFinish(),
 	)
 
-	for i := 0; i < deleteWorkers; i++ {
+	workers := clampWorkers(deleteWorkers)
+	for i := 0; i < workers; i++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
@@ -935,11 +970,20 @@ func hardDeleteParallel(c *client.SchemaRegistryClient, subjects []string) (tota
 		progressbar.OptionClearOnFinish(),
 	)
 
-	for i := 0; i < deleteWorkers; i++ {
+	workers := clampWorkers(deleteWorkers)
+	for i := 0; i < workers; i++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
 			for subj := range jobs {
+				// Check referential integrity before irreversible hard delete
+				if refsByVersion, refErr := checkSubjectReferentialIntegrity(c, subj); refErr == nil && len(refsByVersion) > 0 {
+					output.Error("Cannot delete %s: referenced by other schemas (use --skip-ref-check to bypass)", subj)
+					atomic.AddInt64(&failed, 1)
+					bar.Add(1)
+					continue
+				}
+
 				vers, err := c.DeleteSubject(subj, true)
 				if err != nil {
 					atomic.AddInt64(&failed, 1)
@@ -988,8 +1032,9 @@ func keepLatestVersionsMulti(c *client.SchemaRegistryClient, subjects []string, 
 	)
 
 	// Start workers
+	workers := clampWorkers(deleteWorkers)
 	var wg sync.WaitGroup
-	for i := 0; i < deleteWorkers; i++ {
+	for i := 0; i < workers; i++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
@@ -1015,6 +1060,12 @@ func keepLatestVersionsMulti(c *client.SchemaRegistryClient, subjects []string, 
 				result.Kept = keepN
 
 				for _, v := range toDelete {
+					// Check referential integrity before irreversible delete
+					if refs, refErr := checkReferentialIntegrity(c, subj, v); refErr == nil && len(refs) > 0 {
+						output.Error("Cannot delete %s version %d: referenced by schema IDs: %v (use --skip-ref-check to bypass)", subj, v, refs)
+						continue
+					}
+
 					// Soft delete
 					_, err := c.DeleteVersion(subj, strconv.Itoa(v), false)
 					if err != nil && !strings.Contains(err.Error(), "already deleted") {

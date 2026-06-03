@@ -140,38 +140,47 @@ func (m *MetricsServer) updateLoop(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
+			// Apply one final delta so the last <5s of counts are reflected
+			// instead of being lost on shutdown.
+			m.applyDelta(&prevSnap)
 			return
 		case <-ticker.C:
-			snap := m.stats.Snapshot()
-
-			// Counters: add the delta since last update
-			if delta := snap.SchemasReplicated - prevSnap.SchemasReplicated; delta > 0 {
-				m.schemasReplicated.Add(float64(delta))
-			}
-			if delta := snap.ConfigsReplicated - prevSnap.ConfigsReplicated; delta > 0 {
-				m.configsReplicated.Add(float64(delta))
-			}
-			if delta := snap.DeletesReplicated - prevSnap.DeletesReplicated; delta > 0 {
-				m.deletesReplicated.Add(float64(delta))
-			}
-			if delta := snap.ModesReplicated - prevSnap.ModesReplicated; delta > 0 {
-				m.modesReplicated.Add(float64(delta))
-			}
-			if delta := snap.Errors - prevSnap.Errors; delta > 0 {
-				m.errors.Add(float64(delta))
-			}
-			if delta := snap.EventsProcessed - prevSnap.EventsProcessed; delta > 0 {
-				m.eventsProcessed.Add(float64(delta))
-			}
-			if delta := snap.EventsFiltered - prevSnap.EventsFiltered; delta > 0 {
-				m.eventsFiltered.Add(float64(delta))
-			}
-
-			// Gauges: set directly
-			m.lastOffset.Set(float64(snap.LastOffset))
-			m.uptimeSeconds.Set(snap.Uptime.Seconds())
-
-			prevSnap = snap
+			m.applyDelta(&prevSnap)
 		}
 	}
+}
+
+// applyDelta reads a fresh stats snapshot, adds the per-counter delta since
+// prevSnap, sets the gauges, and updates prevSnap in place.
+func (m *MetricsServer) applyDelta(prevSnap *StatsSnapshot) {
+	snap := m.stats.Snapshot()
+
+	// Counters: add the delta since last update
+	if delta := snap.SchemasReplicated - prevSnap.SchemasReplicated; delta > 0 {
+		m.schemasReplicated.Add(float64(delta))
+	}
+	if delta := snap.ConfigsReplicated - prevSnap.ConfigsReplicated; delta > 0 {
+		m.configsReplicated.Add(float64(delta))
+	}
+	if delta := snap.DeletesReplicated - prevSnap.DeletesReplicated; delta > 0 {
+		m.deletesReplicated.Add(float64(delta))
+	}
+	if delta := snap.ModesReplicated - prevSnap.ModesReplicated; delta > 0 {
+		m.modesReplicated.Add(float64(delta))
+	}
+	if delta := snap.Errors - prevSnap.Errors; delta > 0 {
+		m.errors.Add(float64(delta))
+	}
+	if delta := snap.EventsProcessed - prevSnap.EventsProcessed; delta > 0 {
+		m.eventsProcessed.Add(float64(delta))
+	}
+	if delta := snap.EventsFiltered - prevSnap.EventsFiltered; delta > 0 {
+		m.eventsFiltered.Add(float64(delta))
+	}
+
+	// Gauges: set directly
+	m.lastOffset.Set(float64(snap.LastOffset))
+	m.uptimeSeconds.Set(snap.Uptime.Seconds())
+
+	*prevSnap = snap
 }

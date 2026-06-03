@@ -279,7 +279,7 @@ func runReplicate(cmd *cobra.Command, args []string) error {
 			replicateTarget,
 		)
 		go func() {
-			output.Info("Prometheus metrics at http://0.0.0.0:%d/metrics", replicateMetricsPort)
+			output.Info("Prometheus metrics at http://127.0.0.1:%d/metrics", replicateMetricsPort)
 			if err := metricsServer.Start(ctx); err != nil {
 				output.Warning("Metrics server error: %v", err)
 			}

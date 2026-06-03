@@ -111,8 +111,26 @@ func (c *Consumer) Poll(ctx context.Context) ([]*kgo.Record, error) {
 }
 
 // CommitOffsets commits the current consumer group offsets.
+//
+// NOTE: this commits ALL uncommitted offsets that franz-go has advanced past
+// during PollFetches, which can include records that were not successfully
+// applied. Prefer CommitRecords to commit only a specific (successfully
+// applied) prefix of records and avoid silently skipping failed records.
 func (c *Consumer) CommitOffsets(ctx context.Context) error {
 	return c.client.CommitUncommittedOffsets(ctx)
+}
+
+// CommitRecords commits offsets for exactly the given records (committing the
+// offset immediately after the highest record per partition). This lets the
+// caller commit only the records it has successfully applied, so that a later
+// successful record never commits past an earlier failed one. On restart the
+// consumer group resumes from the first uncommitted (i.e. first unapplied)
+// record.
+func (c *Consumer) CommitRecords(ctx context.Context, recs ...*kgo.Record) error {
+	if len(recs) == 0 {
+		return nil
+	}
+	return c.client.CommitRecords(ctx, recs...)
 }
 
 // Close shuts down the consumer and releases resources.

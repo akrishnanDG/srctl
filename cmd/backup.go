@@ -316,8 +316,9 @@ func backupSubjectsParallel(c *client.SchemaRegistryClient, subjects []string, s
 	)
 
 	// Start workers
+	workers := clampWorkers(backupWorkers)
 	var wg sync.WaitGroup
-	for i := 0; i < backupWorkers; i++ {
+	for i := 0; i < workers; i++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
@@ -399,7 +400,8 @@ func saveSchemasByIDParallel(c *client.SchemaRegistryClient, mappings []IDMappin
 		progressbar.OptionClearOnFinish(),
 	)
 
-	for i := 0; i < backupWorkers; i++ {
+	workers := clampWorkers(backupWorkers)
+	for i := 0; i < workers; i++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
@@ -458,8 +460,9 @@ func backupTagsData(c *client.SchemaRegistryClient, subjects []string, backupDir
 	jobs := make(chan string, len(subjects))
 	results := make(chan tagResult, len(subjects))
 
+	workers := clampWorkers(backupWorkers)
 	var wg sync.WaitGroup
-	for i := 0; i < backupWorkers; i++ {
+	for i := 0; i < workers; i++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
@@ -701,7 +704,9 @@ func runRestore(cmd *cobra.Command, args []string) error {
 		}
 		defer func() {
 			output.Step("Restoring READWRITE mode...")
-			c.SetMode("READWRITE")
+			if err := c.SetMode("READWRITE"); err != nil {
+				output.Error("Failed to restore READWRITE mode; registry may be stuck in IMPORT mode: %v", err)
+			}
 		}()
 	}
 
@@ -793,10 +798,14 @@ func runRestore(cmd *cobra.Command, args []string) error {
 	for _, backup := range backups {
 		// Set subject config
 		if backup.Compatibility != "" {
-			c.SetSubjectConfig(backup.Subject, backup.Compatibility)
+			if err := c.SetSubjectConfig(backup.Subject, backup.Compatibility); err != nil {
+				output.Warning("Failed to set compatibility for %s: %v", backup.Subject, err)
+			}
 		}
 		if backup.Mode != "" {
-			c.SetSubjectMode(backup.Subject, backup.Mode)
+			if err := c.SetSubjectMode(backup.Subject, backup.Mode); err != nil {
+				output.Warning("Failed to set mode for %s: %v", backup.Subject, err)
+			}
 		}
 
 		// Register schemas (in order by version)
