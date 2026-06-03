@@ -146,11 +146,23 @@ func SaveConfig() error {
 	viper.Set("default_output", AppConfig.DefaultOutput)
 	viper.Set("default_context", AppConfig.DefaultContext)
 
+	// Pre-create the target with 0600 and truncate it so the file never exists
+	// with world-readable permissions, even briefly. viper.WriteConfigAs writes
+	// into this existing file without changing its mode (no chmod TOCTOU window).
+	f, err := os.OpenFile(configPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0600)
+	if err != nil {
+		return fmt.Errorf("failed to create config file: %w", err)
+	}
+	if err := f.Close(); err != nil {
+		return fmt.Errorf("failed to create config file: %w", err)
+	}
+
 	if err := viper.WriteConfigAs(configPath); err != nil {
 		return fmt.Errorf("failed to write config file: %w", err)
 	}
 
-	// Restrict permissions since config may contain credentials
+	// Defensively re-assert 0600 in case the writer altered the mode; this is now
+	// a no-op narrowing (file already started restricted) rather than a window.
 	if err := os.Chmod(configPath, 0600); err != nil {
 		return fmt.Errorf("failed to set config file permissions: %w", err)
 	}

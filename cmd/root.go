@@ -3,6 +3,7 @@ package cmd
 import (
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/spf13/cobra"
 	"github.com/srctl/srctl/internal/client"
@@ -147,6 +148,11 @@ func GetClient() (*client.SchemaRegistryClient, error) {
 			Username: user,
 			Password: pass,
 		}
+		// Warn (but don't fail) when sending credentials over plaintext http,
+		// so localhost testing still works.
+		if strings.HasPrefix(strings.ToLower(url), "http://") {
+			fmt.Fprintln(os.Stderr, "warning: sending credentials over plaintext http")
+		}
 	}
 
 	c := client.NewClient(url, auth)
@@ -177,6 +183,9 @@ func GetClientForRegistry(name string) (*client.SchemaRegistryClient, error) {
 		auth = &client.AuthConfig{
 			Username: reg.Username,
 			Password: reg.Password,
+		}
+		if strings.HasPrefix(strings.ToLower(reg.URL), "http://") {
+			fmt.Fprintln(os.Stderr, "warning: sending credentials over plaintext http")
 		}
 	}
 
