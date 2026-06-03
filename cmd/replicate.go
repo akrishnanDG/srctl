@@ -176,8 +176,10 @@ func resolveKafkaConfig(sourceRegistryName string) (kafka.ConsumerConfig, error)
 		cfg.GroupID = fmt.Sprintf("srctl-replicate-%s-%s", replicateSource, replicateTarget)
 	}
 
-	// Start from beginning unless skipping initial sync
-	cfg.FromBeginning = !replicateNoInitialSync
+	// When we do an HTTP initial sync, it already captured current state, so the
+	// Kafka consumer should only stream NEW changes (from the end). With
+	// --no-initial-sync we must replay the full topic history from the beginning.
+	cfg.FromBeginning = replicateNoInitialSync
 
 	return cfg, nil
 }
