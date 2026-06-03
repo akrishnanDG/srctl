@@ -7,9 +7,23 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
 )
+
+// truncateBody returns at most the first 1024 bytes of b as a string,
+// appending "... (truncated)" when the body was cut. This prevents huge
+// (up to 50MB) response bodies from being interpolated into error strings.
+func truncateBody(b []byte) string {
+	const maxLen = 1024
+	if len(b) <= maxLen {
+		return string(b)
+	}
+	return string(b[:maxLen]) + "... (truncated)"
+}
 
 // SchemaRegistryClient is the main client for interacting with Schema Registry
 type SchemaRegistryClient struct {
@@ -54,17 +68,17 @@ type SchemaRuleSet struct {
 
 // SchemaRule represents a single data contract rule
 type SchemaRule struct {
-	Name     string            `json:"name,omitempty"`
-	Doc      string            `json:"doc,omitempty"`
-	Kind     string            `json:"kind,omitempty"`
-	Mode     string            `json:"mode,omitempty"`
-	Type     string            `json:"type,omitempty"`
-	Tags     []string          `json:"tags,omitempty"`
-	Params   map[string]string `json:"params,omitempty"`
-	Expr     string            `json:"expr,omitempty"`
-	OnSuccess string           `json:"onSuccess,omitempty"`
-	OnFailure string           `json:"onFailure,omitempty"`
-	Disabled bool              `json:"disabled,omitempty"`
+	Name      string            `json:"name,omitempty"`
+	Doc       string            `json:"doc,omitempty"`
+	Kind      string            `json:"kind,omitempty"`
+	Mode      string            `json:"mode,omitempty"`
+	Type      string            `json:"type,omitempty"`
+	Tags      []string          `json:"tags,omitempty"`
+	Params    map[string]string `json:"params,omitempty"`
+	Expr      string            `json:"expr,omitempty"`
+	OnSuccess string            `json:"onSuccess,omitempty"`
+	OnFailure string            `json:"onFailure,omitempty"`
+	Disabled  bool              `json:"disabled,omitempty"`
 }
 
 // SchemaReference represents a reference to another schema
@@ -98,10 +112,28 @@ type ServerInfo struct {
 
 // NewClient creates a new Schema Registry client
 func NewClient(baseURL string, auth *AuthConfig) *SchemaRegistryClient {
+	// Default to a generous timeout so bulk/backup operations (which can issue
+	// large single requests) don't fail. Override via SRCTL_HTTP_TIMEOUT (seconds).
+	timeout := 120 * time.Second
+	if v := os.Getenv("SRCTL_HTTP_TIMEOUT"); v != "" {
+		if secs, err := strconv.Atoi(v); err == nil && secs > 0 {
+			timeout = time.Duration(secs) * time.Second
+		}
+	}
 	return &SchemaRegistryClient{
 		BaseURL: strings.TrimRight(baseURL, "/"),
 		HTTPClient: &http.Client{
-			Timeout: 30 * time.Second,
+			Timeout: timeout,
+			CheckRedirect: func(req *http.Request, via []*http.Request) error {
+				// Prevent forwarding credentials to a different host on redirect
+				if len(via) > 0 && req.URL.Host != via[0].URL.Host {
+					return fmt.Errorf("redirect to different host blocked: %s -> %s", via[0].URL.Host, req.URL.Host)
+				}
+				if len(via) >= 10 {
+					return fmt.Errorf("too many redirects")
+				}
+				return nil
+			},
 		},
 		Auth:    auth,
 		Context: "",
@@ -154,7 +186,8 @@ func (c *SchemaRegistryClient) doRequest(method, urlPath string, body interface{
 	}
 	defer resp.Body.Close()
 
-	respBody, err := io.ReadAll(resp.Body)
+	const maxResponseSize = 50 * 1024 * 1024 // 50 MB
+	respBody, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseSize))
 	if err != nil {
 		return nil, resp.StatusCode, fmt.Errorf("failed to read response body: %w", err)
 	}
@@ -170,7 +203,7 @@ func (c *SchemaRegistryClient) GetContexts() ([]string, error) {
 	}
 
 	if statusCode != http.StatusOK {
-		return nil, fmt.Errorf("failed to get contexts: %s (status %d)", string(respBody), statusCode)
+		return nil, fmt.Errorf("failed to get contexts: %s (status %d)", truncateBody(respBody), statusCode)
 	}
 
 	var contexts []string
@@ -194,7 +227,7 @@ func (c *SchemaRegistryClient) GetSubjects(includeDeleted bool) ([]string, error
 	}
 
 	if statusCode != http.StatusOK {
-		return nil, fmt.Errorf("failed to get subjects: %s (status %d)", string(respBody), statusCode)
+		return nil, fmt.Errorf("failed to get subjects: %s (status %d)", truncateBody(respBody), statusCode)
 	}
 
 	var subjects []string
@@ -218,13 +251,16 @@ func (c *SchemaRegistryClient) GetVersions(subject string, includeDeleted bool) 
 	}
 
 	if statusCode != http.StatusOK {
-		return nil, fmt.Errorf("failed to get versions: %s (status %d)", string(respBody), statusCode)
+		return nil, fmt.Errorf("failed to get versions: %s (status %d)", truncateBody(respBody), statusCode)
 	}
 
 	var versions []int
 	if err := json.Unmarshal(respBody, &versions); err != nil {
 		return nil, fmt.Errorf("failed to parse versions response: %w", err)
 	}
+
+	// Ensure ascending order; callers (e.g. --keep-latest, export latest) rely on this.
+	sort.Ints(versions)
 
 	return versions, nil
 }
@@ -236,7 +272,7 @@ func (c *SchemaRegistryClient) GetSchema(subject string, version string) (*Schem
 
 // GetSchemaWithDeleted returns a schema, optionally including deleted schemas
 func (c *SchemaRegistryClient) GetSchemaWithDeleted(subject string, version string, includeDeleted bool) (*Schema, error) {
-	urlPath := c.buildURL(fmt.Sprintf("/subjects/%s/versions/%s", url.PathEscape(subject), version))
+	urlPath := c.buildURL(fmt.Sprintf("/subjects/%s/versions/%s", url.PathEscape(subject), url.PathEscape(version)))
 	if includeDeleted {
 		urlPath += "?deleted=true"
 	}
@@ -247,7 +283,7 @@ func (c *SchemaRegistryClient) GetSchemaWithDeleted(subject string, version stri
 	}
 
 	if statusCode != http.StatusOK {
-		return nil, fmt.Errorf("failed to get schema: %s (status %d)", string(respBody), statusCode)
+		return nil, fmt.Errorf("failed to get schema: %s (status %d)", truncateBody(respBody), statusCode)
 	}
 
 	var schema Schema
@@ -268,7 +304,7 @@ func (c *SchemaRegistryClient) GetSchemaByID(id int) (*Schema, error) {
 	}
 
 	if statusCode != http.StatusOK {
-		return nil, fmt.Errorf("failed to get schema by ID: %s (status %d)", string(respBody), statusCode)
+		return nil, fmt.Errorf("failed to get schema by ID: %s (status %d)", truncateBody(respBody), statusCode)
 	}
 
 	var schema Schema
@@ -290,11 +326,13 @@ func (c *SchemaRegistryClient) GetSchemaReferencedBy(subject string, version int
 	}
 
 	if statusCode == http.StatusNotFound {
+		// List endpoint: 404 means nothing references this version (empty list),
+		// not a config-inheritance fallback.
 		return []int{}, nil
 	}
 
 	if statusCode != http.StatusOK {
-		return nil, fmt.Errorf("failed to get referencedby: %s (status %d)", string(respBody), statusCode)
+		return nil, fmt.Errorf("failed to get referencedby: %s (status %d)", truncateBody(respBody), statusCode)
 	}
 
 	var schemaIDs []int
@@ -315,7 +353,7 @@ func (c *SchemaRegistryClient) GetSchemaSubjectVersionsByID(id int) ([]SubjectVe
 	}
 
 	if statusCode != http.StatusOK {
-		return nil, fmt.Errorf("failed to get schema versions by ID: %s (status %d)", string(respBody), statusCode)
+		return nil, fmt.Errorf("failed to get schema versions by ID: %s (status %d)", truncateBody(respBody), statusCode)
 	}
 
 	var subjectVersions []SubjectVersion
@@ -356,7 +394,7 @@ func (c *SchemaRegistryClient) RegisterSchema(subject string, schema *Schema) (i
 	}
 
 	if statusCode != http.StatusOK {
-		return 0, fmt.Errorf("failed to register schema: %s (status %d)", string(respBody), statusCode)
+		return 0, fmt.Errorf("failed to register schema: %s (status %d)", truncateBody(respBody), statusCode)
 	}
 
 	var result struct {
@@ -382,7 +420,7 @@ func (c *SchemaRegistryClient) DeleteSubject(subject string, permanent bool) ([]
 	}
 
 	if statusCode != http.StatusOK {
-		return nil, fmt.Errorf("failed to delete subject: %s (status %d)", string(respBody), statusCode)
+		return nil, fmt.Errorf("failed to delete subject: %s (status %d)", truncateBody(respBody), statusCode)
 	}
 
 	var versions []int
@@ -395,7 +433,7 @@ func (c *SchemaRegistryClient) DeleteSubject(subject string, permanent bool) ([]
 
 // DeleteVersion deletes a specific version (soft delete by default)
 func (c *SchemaRegistryClient) DeleteVersion(subject string, version string, permanent bool) (int, error) {
-	urlPath := c.buildURL(fmt.Sprintf("/subjects/%s/versions/%s", url.PathEscape(subject), version))
+	urlPath := c.buildURL(fmt.Sprintf("/subjects/%s/versions/%s", url.PathEscape(subject), url.PathEscape(version)))
 	if permanent {
 		urlPath += "?permanent=true"
 	}
@@ -406,7 +444,7 @@ func (c *SchemaRegistryClient) DeleteVersion(subject string, version string, per
 	}
 
 	if statusCode != http.StatusOK {
-		return 0, fmt.Errorf("failed to delete version: %s (status %d)", string(respBody), statusCode)
+		return 0, fmt.Errorf("failed to delete version: %s (status %d)", truncateBody(respBody), statusCode)
 	}
 
 	var deletedVersion int
@@ -427,7 +465,7 @@ func (c *SchemaRegistryClient) GetConfig() (*Config, error) {
 	}
 
 	if statusCode != http.StatusOK {
-		return nil, fmt.Errorf("failed to get config: %s (status %d)", string(respBody), statusCode)
+		return nil, fmt.Errorf("failed to get config: %s (status %d)", truncateBody(respBody), statusCode)
 	}
 
 	var config Config
@@ -438,7 +476,10 @@ func (c *SchemaRegistryClient) GetConfig() (*Config, error) {
 	return &config, nil
 }
 
-// GetSubjectConfig returns the compatibility configuration for a subject
+// GetSubjectConfig returns the compatibility configuration for a subject.
+// A 404 is not an error here: it means the subject has no compatibility
+// override and falls back to the global config. Callers receive (nil, nil)
+// to signal "use global".
 func (c *SchemaRegistryClient) GetSubjectConfig(subject string, defaultToGlobal bool) (*Config, error) {
 	urlPath := c.buildURL(fmt.Sprintf("/config/%s", url.PathEscape(subject)))
 	if defaultToGlobal {
@@ -451,12 +492,12 @@ func (c *SchemaRegistryClient) GetSubjectConfig(subject string, defaultToGlobal 
 	}
 
 	if statusCode == http.StatusNotFound {
-		// No specific config, return nil to indicate using global
+		// No subject-level override; fall back to global config.
 		return nil, nil
 	}
 
 	if statusCode != http.StatusOK {
-		return nil, fmt.Errorf("failed to get subject config: %s (status %d)", string(respBody), statusCode)
+		return nil, fmt.Errorf("failed to get subject config: %s (status %d)", truncateBody(respBody), statusCode)
 	}
 
 	var config Config
@@ -478,7 +519,7 @@ func (c *SchemaRegistryClient) SetConfig(compatibility string) error {
 	}
 
 	if statusCode != http.StatusOK {
-		return fmt.Errorf("failed to set config: %s (status %d)", string(respBody), statusCode)
+		return fmt.Errorf("failed to set config: %s (status %d)", truncateBody(respBody), statusCode)
 	}
 
 	return nil
@@ -495,7 +536,7 @@ func (c *SchemaRegistryClient) SetSubjectConfig(subject string, compatibility st
 	}
 
 	if statusCode != http.StatusOK {
-		return fmt.Errorf("failed to set subject config: %s (status %d)", string(respBody), statusCode)
+		return fmt.Errorf("failed to set subject config: %s (status %d)", truncateBody(respBody), statusCode)
 	}
 
 	return nil
@@ -511,7 +552,7 @@ func (c *SchemaRegistryClient) GetMode() (*Mode, error) {
 	}
 
 	if statusCode != http.StatusOK {
-		return nil, fmt.Errorf("failed to get mode: %s (status %d)", string(respBody), statusCode)
+		return nil, fmt.Errorf("failed to get mode: %s (status %d)", truncateBody(respBody), statusCode)
 	}
 
 	var mode Mode
@@ -522,7 +563,10 @@ func (c *SchemaRegistryClient) GetMode() (*Mode, error) {
 	return &mode, nil
 }
 
-// GetSubjectMode returns the mode for a subject
+// GetSubjectMode returns the mode for a subject.
+// A 404 is not an error here: it means the subject has no mode override and
+// falls back to the global mode. Callers receive (nil, nil) to signal
+// "use global".
 func (c *SchemaRegistryClient) GetSubjectMode(subject string, defaultToGlobal bool) (*Mode, error) {
 	urlPath := c.buildURL(fmt.Sprintf("/mode/%s", url.PathEscape(subject)))
 	if defaultToGlobal {
@@ -535,11 +579,12 @@ func (c *SchemaRegistryClient) GetSubjectMode(subject string, defaultToGlobal bo
 	}
 
 	if statusCode == http.StatusNotFound {
+		// No subject-level override; fall back to global mode.
 		return nil, nil
 	}
 
 	if statusCode != http.StatusOK {
-		return nil, fmt.Errorf("failed to get subject mode: %s (status %d)", string(respBody), statusCode)
+		return nil, fmt.Errorf("failed to get subject mode: %s (status %d)", truncateBody(respBody), statusCode)
 	}
 
 	var mode Mode
@@ -561,7 +606,7 @@ func (c *SchemaRegistryClient) SetMode(mode string) error {
 	}
 
 	if statusCode != http.StatusOK {
-		return fmt.Errorf("failed to set mode: %s (status %d)", string(respBody), statusCode)
+		return fmt.Errorf("failed to set mode: %s (status %d)", truncateBody(respBody), statusCode)
 	}
 
 	return nil
@@ -578,7 +623,7 @@ func (c *SchemaRegistryClient) SetSubjectMode(subject string, mode string) error
 	}
 
 	if statusCode != http.StatusOK {
-		return fmt.Errorf("failed to set subject mode: %s (status %d)", string(respBody), statusCode)
+		return fmt.Errorf("failed to set subject mode: %s (status %d)", truncateBody(respBody), statusCode)
 	}
 
 	return nil
@@ -586,7 +631,7 @@ func (c *SchemaRegistryClient) SetSubjectMode(subject string, mode string) error
 
 // CheckCompatibility checks if a schema is compatible with the latest version
 func (c *SchemaRegistryClient) CheckCompatibility(subject string, schema *Schema, version string) (bool, error) {
-	urlPath := c.buildURL(fmt.Sprintf("/compatibility/subjects/%s/versions/%s", url.PathEscape(subject), version))
+	urlPath := c.buildURL(fmt.Sprintf("/compatibility/subjects/%s/versions/%s", url.PathEscape(subject), url.PathEscape(version)))
 
 	reqBody := map[string]interface{}{
 		"schema": schema.Schema,
@@ -604,7 +649,7 @@ func (c *SchemaRegistryClient) CheckCompatibility(subject string, schema *Schema
 	}
 
 	if statusCode != http.StatusOK {
-		return false, fmt.Errorf("failed to check compatibility: %s (status %d)", string(respBody), statusCode)
+		return false, fmt.Errorf("failed to check compatibility: %s (status %d)", truncateBody(respBody), statusCode)
 	}
 
 	var result struct {
@@ -630,7 +675,7 @@ func (c *SchemaRegistryClient) GetAllSchemas(includeDeleted bool) ([]Schema, err
 	}
 
 	if statusCode != http.StatusOK {
-		return nil, fmt.Errorf("failed to get all schemas: %s (status %d)", string(respBody), statusCode)
+		return nil, fmt.Errorf("failed to get all schemas: %s (status %d)", truncateBody(respBody), statusCode)
 	}
 
 	var schemas []Schema
@@ -651,7 +696,7 @@ func (c *SchemaRegistryClient) GetSchemaTypes() ([]string, error) {
 	}
 
 	if statusCode != http.StatusOK {
-		return nil, fmt.Errorf("failed to get schema types: %s (status %d)", string(respBody), statusCode)
+		return nil, fmt.Errorf("failed to get schema types: %s (status %d)", truncateBody(respBody), statusCode)
 	}
 
 	var types []string
@@ -686,7 +731,7 @@ func (c *SchemaRegistryClient) GetTags() ([]Tag, error) {
 	}
 
 	if statusCode != http.StatusOK {
-		return nil, fmt.Errorf("failed to get tags: %s (status %d)", string(respBody), statusCode)
+		return nil, fmt.Errorf("failed to get tags: %s (status %d)", truncateBody(respBody), statusCode)
 	}
 
 	var tags []Tag
@@ -707,7 +752,7 @@ func (c *SchemaRegistryClient) CreateTag(tag *Tag) error {
 	}
 
 	if statusCode != http.StatusOK && statusCode != http.StatusCreated {
-		return fmt.Errorf("failed to create tag: %s (status %d)", string(respBody), statusCode)
+		return fmt.Errorf("failed to create tag: %s (status %d)", truncateBody(respBody), statusCode)
 	}
 
 	return nil
@@ -723,7 +768,7 @@ func (c *SchemaRegistryClient) DeleteTag(tagName string) error {
 	}
 
 	if statusCode != http.StatusOK && statusCode != http.StatusNoContent {
-		return fmt.Errorf("failed to delete tag: %s (status %d)", string(respBody), statusCode)
+		return fmt.Errorf("failed to delete tag: %s (status %d)", truncateBody(respBody), statusCode)
 	}
 
 	return nil
@@ -740,11 +785,12 @@ func (c *SchemaRegistryClient) GetSubjectTags(subject string) ([]TagAssignment, 
 	}
 
 	if statusCode == http.StatusNotFound {
+		// List endpoint: 404 means no tags are assigned (empty list).
 		return []TagAssignment{}, nil
 	}
 
 	if statusCode != http.StatusOK {
-		return nil, fmt.Errorf("failed to get subject tags: %s (status %d)", string(respBody), statusCode)
+		return nil, fmt.Errorf("failed to get subject tags: %s (status %d)", truncateBody(respBody), statusCode)
 	}
 
 	var tags []TagAssignment
@@ -770,7 +816,7 @@ func (c *SchemaRegistryClient) AssignTagToSubject(subject, tagName string) error
 	}
 
 	if statusCode != http.StatusOK && statusCode != http.StatusCreated {
-		return fmt.Errorf("failed to assign tag: %s (status %d)", string(respBody), statusCode)
+		return fmt.Errorf("failed to assign tag: %s (status %d)", truncateBody(respBody), statusCode)
 	}
 
 	return nil
@@ -787,7 +833,7 @@ func (c *SchemaRegistryClient) RemoveTagFromSubject(subject, tagName string) err
 	}
 
 	if statusCode != http.StatusOK && statusCode != http.StatusNoContent {
-		return fmt.Errorf("failed to remove tag: %s (status %d)", string(respBody), statusCode)
+		return fmt.Errorf("failed to remove tag: %s (status %d)", truncateBody(respBody), statusCode)
 	}
 
 	return nil
@@ -804,11 +850,12 @@ func (c *SchemaRegistryClient) GetSchemaTags(subject string, version int) ([]Tag
 	}
 
 	if statusCode == http.StatusNotFound {
+		// List endpoint: 404 means no tags are assigned (empty list).
 		return []TagAssignment{}, nil
 	}
 
 	if statusCode != http.StatusOK {
-		return nil, fmt.Errorf("failed to get schema tags: %s (status %d)", string(respBody), statusCode)
+		return nil, fmt.Errorf("failed to get schema tags: %s (status %d)", truncateBody(respBody), statusCode)
 	}
 
 	var tags []TagAssignment
@@ -834,7 +881,7 @@ func (c *SchemaRegistryClient) AssignTagToSchema(subject string, version int, ta
 	}
 
 	if statusCode != http.StatusOK && statusCode != http.StatusCreated {
-		return fmt.Errorf("failed to assign tag to schema: %s (status %d)", string(respBody), statusCode)
+		return fmt.Errorf("failed to assign tag to schema: %s (status %d)", truncateBody(respBody), statusCode)
 	}
 
 	return nil
@@ -851,7 +898,7 @@ func (c *SchemaRegistryClient) RemoveTagFromSchema(subject string, version int, 
 	}
 
 	if statusCode != http.StatusOK && statusCode != http.StatusNoContent {
-		return fmt.Errorf("failed to remove tag from schema: %s (status %d)", string(respBody), statusCode)
+		return fmt.Errorf("failed to remove tag from schema: %s (status %d)", truncateBody(respBody), statusCode)
 	}
 
 	return nil

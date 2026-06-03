@@ -11,6 +11,7 @@ import (
 	"github.com/srctl/srctl/internal/client"
 	"github.com/srctl/srctl/internal/kafka"
 	"github.com/srctl/srctl/internal/output"
+	"github.com/twmb/franz-go/pkg/kgo"
 )
 
 // Config holds replicator configuration.
@@ -37,8 +38,8 @@ type Stats struct {
 	Errors            int64
 	LastOffset        int64
 	LastEventTime     time.Time
-	EventsProcessed  int64
-	EventsFiltered   int64
+	EventsProcessed   int64
+	EventsFiltered    int64
 }
 
 // StatsSnapshot is a point-in-time copy of stats.
@@ -49,8 +50,8 @@ type StatsSnapshot struct {
 	DeletesReplicated int64
 	ModesReplicated   int64
 	Errors            int64
-	EventsProcessed  int64
-	EventsFiltered   int64
+	EventsProcessed   int64
+	EventsFiltered    int64
 	LastOffset        int64
 	LastEventTime     time.Time
 }
@@ -120,8 +121,8 @@ func (s *Stats) Snapshot() StatsSnapshot {
 		DeletesReplicated: s.DeletesReplicated,
 		ModesReplicated:   s.ModesReplicated,
 		Errors:            s.Errors,
-		EventsProcessed:  s.EventsProcessed,
-		EventsFiltered:   s.EventsFiltered,
+		EventsProcessed:   s.EventsProcessed,
+		EventsFiltered:    s.EventsFiltered,
 		LastOffset:        s.LastOffset,
 		LastEventTime:     s.LastEventTime,
 	}
@@ -194,25 +195,39 @@ func (r *Replicator) Run(ctx context.Context) error {
 		// Reset backoff on successful poll
 		pollBackoff = time.Second
 
-		batchOK := true
+		// Track records that were successfully applied, IN ORDER. We commit
+		// only this prefix. The guarantee we maintain is: never commit past a
+		// record that has not been successfully applied. On the first
+		// unrecoverable failure we stop processing the rest of the batch so a
+		// later success can't advance the committed offset past the failure.
+		// On restart the consumer group resumes from the first uncommitted
+		// (i.e. first unapplied) record, making replay correct.
+		applied := make([]*kgo.Record, 0, len(records))
 		for _, record := range records {
 			event, err := kafka.ParseRecord(record.Key, record.Value, record.Offset, record.Partition)
 			if err != nil {
-				output.Warning("Parse error at offset %d: %v", record.Offset, err)
+				// A record that cannot be parsed will never become parseable
+				// on retry; treat it as applied so we make forward progress
+				// rather than blocking the stream forever on a poison record.
+				output.Warning("Parse error at offset %d (skipping): %v", record.Offset, err)
 				r.stats.IncrErrors()
+				applied = append(applied, record)
 				continue
 			}
 
 			if event == nil {
-				continue // NOOP or empty
+				// NOOP or empty: nothing to apply, but the offset is safe to commit.
+				applied = append(applied, record)
+				continue
 			}
 
 			r.stats.IncrProcessed()
 
-			// Apply filter
+			// Apply filter. SR subjects are case-sensitive, so match exactly.
 			if r.cfg.Filter != "" && event.Subject != "" {
-				if !matchGlob(strings.ToLower(event.Subject), strings.ToLower(r.cfg.Filter)) {
+				if !matchGlob(event.Subject, r.cfg.Filter) {
 					r.stats.IncrFiltered()
+					applied = append(applied, record)
 					continue
 				}
 			}
@@ -223,17 +238,22 @@ func (r *Replicator) Run(ctx context.Context) error {
 				output.Error("Failed to apply %s event for %s at offset %d: %v",
 					event.Type, event.Subject, event.Offset, err)
 				r.stats.IncrErrors()
-				batchOK = false
+				// Stop the batch on the first unrecoverable failure. We do NOT
+				// add this record to `applied`, so the commit below stops just
+				// before it and it will be re-polled on restart.
+				break
 			}
 
+			applied = append(applied, record)
 			r.stats.SetOffset(event.Offset)
 			r.stats.SetLastEventTime(time.Now())
 		}
 
-		// Only commit offsets if the entire batch succeeded.
-		// On failure, offsets stay uncommitted so events will be replayed on restart.
-		if len(records) > 0 && batchOK {
-			if err := r.cfg.Consumer.CommitOffsets(ctx); err != nil {
+		// Commit exactly the successfully-applied prefix. CommitRecords commits
+		// the offset immediately after the highest applied record per
+		// partition, so we never commit past an unapplied record.
+		if len(applied) > 0 {
+			if err := r.cfg.Consumer.CommitRecords(ctx, applied...); err != nil {
 				output.Warning("Failed to commit offsets: %v", err)
 			}
 		}
@@ -300,9 +320,20 @@ func (r *Replicator) applyWithRetry(ctx context.Context, event *kafka.SchemaEven
 // (client-side errors like incompatible schema, bad request, etc.)
 func isNonRetryableError(err error) bool {
 	msg := err.Error()
-	// 409 Conflict (schema already exists) is handled as success elsewhere
-	// 422 Unprocessable (incompatible schema, invalid schema)
-	// 400 Bad Request
+	lower := strings.ToLower(msg)
+
+	// A missing/unresolved reference also surfaces as 422 (error code 42201),
+	// but it is transient during streaming: the referenced subject may simply
+	// not have been registered on the target yet. Keep these RETRYABLE so the
+	// retry budget can ride out ordering races; only genuine incompatibility
+	// errors should fail fast.
+	if strings.Contains(lower, "reference") {
+		return false
+	}
+
+	// 409 Conflict (schema already exists) is handled as success elsewhere.
+	// 422 Unprocessable (incompatible schema, invalid schema) and
+	// 400 Bad Request are genuine client errors that won't resolve on retry.
 	if strings.Contains(msg, "status 422") || strings.Contains(msg, "status 400") {
 		return true
 	}
@@ -365,7 +396,30 @@ func (r *Replicator) applySchemaEvent(event *kafka.SchemaEvent) error {
 	if r.cfg.PreserveIDs {
 		schema.ID = event.SchemaID
 		// CCloud requires subject-level IMPORT mode
-		_ = r.cfg.TargetClient.SetSubjectMode(event.Subject, "IMPORT")
+		if err := r.cfg.TargetClient.SetSubjectMode(event.Subject, "IMPORT"); err != nil {
+			// Idempotency: if IMPORT mode can't be set because the subject already
+			// exists / has existing subjects (e.g. HTTP initial sync already
+			// replicated this, or replication was restarted against a populated
+			// target), this is only a real failure if the schema is NOT already
+			// present. If the schema is already present on the target, treat the
+			// event as a successfully-applied no-op so offset progress isn't
+			// blocked. Otherwise it's a genuine error we must not silently drop.
+			if isExistingSubjectsImportError(err) && r.schemaAlreadyPresent(event) {
+				output.Info("Skipping %s v%d: schema already present on target (import mode unavailable)",
+					event.Subject, event.Version)
+				return nil
+			}
+			output.Warning("Failed to set IMPORT mode for %s: %v", event.Subject, err)
+			return fmt.Errorf("failed to set IMPORT mode for %s: %w", event.Subject, err)
+		}
+		// IMPORT mode was set successfully: restore READWRITE on EVERY exit
+		// path (including error returns) so the subject is never left stuck in
+		// IMPORT mode.
+		defer func() {
+			if err := r.cfg.TargetClient.SetSubjectMode(event.Subject, "READWRITE"); err != nil {
+				output.Warning("Failed to restore READWRITE mode for %s: %v", event.Subject, err)
+			}
+		}()
 	}
 
 	_, err := r.cfg.TargetClient.RegisterSchema(event.Subject, schema)
@@ -377,16 +431,20 @@ func (r *Replicator) applySchemaEvent(event *kafka.SchemaEvent) error {
 		return fmt.Errorf("failed to register %s v%d: %w", event.Subject, event.Version, err)
 	}
 
-	if r.cfg.PreserveIDs {
-		// Restore READWRITE mode for the subject
-		_ = r.cfg.TargetClient.SetSubjectMode(event.Subject, "READWRITE")
-	}
-
 	r.stats.IncrSchemas()
 	return nil
 }
 
 func (r *Replicator) applyConfigEvent(event *kafka.SchemaEvent) error {
+	if event.Tombstone {
+		// A tombstoned CONFIG event means the compatibility override was
+		// deleted (reset to the global/default). The client interface exposes
+		// no delete-config method, so we cannot replicate the reset. Pushing
+		// SetConfig("") would register an invalid empty compatibility level, so
+		// we skip it and log instead.
+		output.Info("Config reset (tombstone) for %q not replicated: deleting config overrides is not supported by the target client", event.Subject)
+		return nil
+	}
 	if event.Subject == "" {
 		// Global config
 		if err := r.cfg.TargetClient.SetConfig(event.Compatibility); err != nil {
@@ -450,56 +508,122 @@ func (r *Replicator) performInitialSync(ctx context.Context) error {
 
 	output.Info("Initial sync: %d subjects to replicate", len(subjects))
 
-	for _, subj := range subjects {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		default:
-		}
+	// Subjects whose latest schema has references must be registered AFTER the
+	// subjects they reference. Rather than building a full topological sort
+	// (which requires resolving every reference's subject across versions), we
+	// do a bounded multi-pass: attempt all remaining subjects, defer the ones
+	// that fail with a missing-reference error, and repeat until a pass makes
+	// no progress. This converges in O(depth) passes for valid DAGs and stops
+	// cleanly on genuinely unresolvable subjects.
+	remaining := subjects
+	for pass := 1; len(remaining) > 0; pass++ {
+		var deferred []string
+		progress := false
 
-		versions, err := source.GetVersions(subj, false)
-		if err != nil {
-			output.Warning("Skipping %s: %v", subj, err)
-			continue
-		}
+		for _, subj := range remaining {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			default:
+			}
 
-		if r.cfg.PreserveIDs {
-			_ = target.SetSubjectMode(subj, "IMPORT")
-		}
-
-		for _, v := range versions {
-			schema, err := source.GetSchema(subj, strconv.Itoa(v))
-			if err != nil {
-				output.Warning("Skipping %s v%d: %v", subj, v, err)
+			retryable, err := r.syncSubject(source, target, subj)
+			if err == nil {
+				progress = true
 				continue
 			}
-
-			regSchema := &client.Schema{
-				Schema:     schema.Schema,
-				SchemaType: schema.SchemaType,
-				References: schema.References,
-				Metadata:   schema.Metadata,
-				RuleSet:    schema.RuleSet,
+			if retryable {
+				// Likely a missing reference; try again on a later pass once
+				// its dependencies have been registered.
+				deferred = append(deferred, subj)
+				continue
 			}
-			if r.cfg.PreserveIDs {
-				regSchema.ID = schema.ID
-			}
-
-			_, err = target.RegisterSchema(subj, regSchema)
-			if err != nil && !isAlreadyExistsError(err) {
-				output.Warning("Failed to register %s v%d: %v", subj, v, err)
-				r.stats.IncrErrors()
-			} else {
-				r.stats.IncrSchemas()
-			}
+			// Non-retryable failure: already logged in syncSubject.
+			progress = true
 		}
 
-		if r.cfg.PreserveIDs {
-			_ = target.SetSubjectMode(subj, "READWRITE")
+		if len(deferred) == 0 {
+			break
 		}
+		if !progress {
+			// No subject made progress this pass: remaining subjects have
+			// references we can't resolve. Register them anyway so the error
+			// is surfaced per-subject rather than silently dropped.
+			output.Warning("Initial sync: %d subjects have unresolved references after %d passes; attempting final registration", len(deferred), pass)
+			for _, subj := range deferred {
+				if _, err := r.syncSubject(source, target, subj); err != nil {
+					output.Warning("Failed to sync %s (unresolved references): %v", subj, err)
+				}
+			}
+			break
+		}
+		remaining = deferred
 	}
 
 	return nil
+}
+
+// syncSubject registers all versions of a single subject on the target.
+// It returns (retryable=true, err) when the failure looks like a missing
+// reference that may resolve once other subjects are registered. Any
+// per-version errors that are not retryable are logged and counted here, and
+// such a subject is reported as a non-retryable completion (nil error) unless
+// IMPORT-mode setup itself failed.
+func (r *Replicator) syncSubject(source, target client.SchemaRegistryClientInterface, subj string) (retryable bool, err error) {
+	versions, err := source.GetVersions(subj, false)
+	if err != nil {
+		output.Warning("Skipping %s: %v", subj, err)
+		return false, nil
+	}
+
+	if r.cfg.PreserveIDs {
+		if err := target.SetSubjectMode(subj, "IMPORT"); err != nil {
+			output.Warning("Failed to set IMPORT mode for %s, skipping: %v", subj, err)
+			r.stats.IncrErrors()
+			return false, nil
+		}
+		// Restore READWRITE on every exit path so the subject is never left
+		// stuck in IMPORT mode.
+		defer func() {
+			if rerr := target.SetSubjectMode(subj, "READWRITE"); rerr != nil {
+				output.Warning("Failed to restore READWRITE mode for %s: %v", subj, rerr)
+			}
+		}()
+	}
+
+	for _, v := range versions {
+		schema, gerr := source.GetSchema(subj, strconv.Itoa(v))
+		if gerr != nil {
+			output.Warning("Skipping %s v%d: %v", subj, v, gerr)
+			continue
+		}
+
+		regSchema := &client.Schema{
+			Schema:     schema.Schema,
+			SchemaType: schema.SchemaType,
+			References: schema.References,
+			Metadata:   schema.Metadata,
+			RuleSet:    schema.RuleSet,
+		}
+		if r.cfg.PreserveIDs {
+			regSchema.ID = schema.ID
+		}
+
+		_, rerr := target.RegisterSchema(subj, regSchema)
+		if rerr != nil && !isAlreadyExistsError(rerr) {
+			// A missing reference means a subject this one depends on hasn't
+			// been registered yet; signal the caller to retry on a later pass.
+			if !isNonRetryableError(rerr) && strings.Contains(strings.ToLower(rerr.Error()), "reference") {
+				return true, rerr
+			}
+			output.Warning("Failed to register %s v%d: %v", subj, v, rerr)
+			r.stats.IncrErrors()
+		} else {
+			r.stats.IncrSchemas()
+		}
+	}
+
+	return false, nil
 }
 
 func isAlreadyExistsError(err error) bool {
@@ -508,12 +632,63 @@ func isAlreadyExistsError(err error) bool {
 		strings.Contains(msg, "already registered")
 }
 
-// filterSubjects filters subjects by a glob pattern.
+// isExistingSubjectsImportError reports whether the error indicates the target
+// could not be put into IMPORT mode because it already has existing subjects
+// (SR error code 42205 / "found existing subjects"). This happens when the
+// HTTP initial sync already populated the target, or when replication is
+// restarted against an already-populated target.
+func isExistingSubjectsImportError(err error) bool {
+	msg := err.Error()
+	return strings.Contains(msg, "found existing subjects") ||
+		strings.Contains(msg, "42205")
+}
+
+// schemaAlreadyPresent reports whether the schema in the event is already
+// registered on the target for its subject. It first tries to match by the
+// preserved schema ID (the source ID we want on the target), then falls back
+// to matching the exact schema content across the subject's versions. A true
+// result means re-applying the event would be a no-op, so the event can be
+// safely treated as already applied.
+func (r *Replicator) schemaAlreadyPresent(event *kafka.SchemaEvent) bool {
+	if event.Subject == "" {
+		return false
+	}
+
+	// Fast path: if a schema with the preserved ID exists and maps to this
+	// subject, it's already present.
+	if event.SchemaID != 0 {
+		if sv, err := r.cfg.TargetClient.GetSchemaSubjectVersionsByID(event.SchemaID); err == nil {
+			for _, m := range sv {
+				if m.Subject == event.Subject {
+					return true
+				}
+			}
+		}
+	}
+
+	// Fallback: compare exact schema content across the subject's versions.
+	versions, err := r.cfg.TargetClient.GetVersions(event.Subject, false)
+	if err != nil {
+		return false
+	}
+	for _, v := range versions {
+		s, err := r.cfg.TargetClient.GetSchema(event.Subject, strconv.Itoa(v))
+		if err != nil {
+			continue
+		}
+		if s.Schema == event.Schema {
+			return true
+		}
+	}
+	return false
+}
+
+// filterSubjects filters subjects by a glob pattern. SR subjects are
+// case-sensitive, so matching is exact (no case folding).
 func filterSubjects(subjects []string, pattern string) []string {
 	var filtered []string
-	pattern = strings.ToLower(pattern)
 	for _, subj := range subjects {
-		if matchGlob(strings.ToLower(subj), pattern) {
+		if matchGlob(subj, pattern) {
 			filtered = append(filtered, subj)
 		}
 	}

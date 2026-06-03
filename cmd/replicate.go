@@ -1,7 +1,7 @@
 package cmd
 
 import (
-	gocontext "context"
+	"context"
 	"fmt"
 	"os"
 	"os/signal"
@@ -176,8 +176,10 @@ func resolveKafkaConfig(sourceRegistryName string) (kafka.ConsumerConfig, error)
 		cfg.GroupID = fmt.Sprintf("srctl-replicate-%s-%s", replicateSource, replicateTarget)
 	}
 
-	// Start from beginning unless skipping initial sync
-	cfg.FromBeginning = !replicateNoInitialSync
+	// When we do an HTTP initial sync, it already captured current state, so the
+	// Kafka consumer should only stream NEW changes (from the end). With
+	// --no-initial-sync we must replay the full topic history from the beginning.
+	cfg.FromBeginning = replicateNoInitialSync
 
 	return cfg, nil
 }
@@ -201,7 +203,7 @@ func runReplicate(cmd *cobra.Command, args []string) error {
 	}
 
 	// Build context with signal handling for graceful shutdown
-	ctx, cancel := gocontext.WithCancel(gocontext.Background())
+	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
 	sigCh := make(chan os.Signal, 1)
@@ -279,7 +281,7 @@ func runReplicate(cmd *cobra.Command, args []string) error {
 			replicateTarget,
 		)
 		go func() {
-			output.Info("Prometheus metrics at http://0.0.0.0:%d/metrics", replicateMetricsPort)
+			output.Info("Prometheus metrics at http://127.0.0.1:%d/metrics", replicateMetricsPort)
 			if err := metricsServer.Start(ctx); err != nil {
 				output.Warning("Metrics server error: %v", err)
 			}

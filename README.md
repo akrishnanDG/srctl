@@ -40,7 +40,7 @@ A powerful CLI tool for Confluent Schema Registry that provides advanced capabil
 - **replicate** - Continuously replicate schemas in real-time by consuming the `_schemas` Kafka topic
 
 ### Data Contracts
-- **contract** - Manage data contract rules (get, set, validate)
+- **contract** - Manage data contract rules (get, validate; set/delete planned)
 
 ### Configuration & Analysis
 - **config** - Manage compatibility settings at all levels
@@ -52,10 +52,16 @@ A powerful CLI tool for Confluent Schema Registry that provides advanced capabil
 
 ## Installation
 
+### Homebrew (macOS/Linux)
+
+```bash
+brew install akrishnanDG/tap/srctl
+```
+
 ### From Source
 
 ```bash
-git clone https://github.com/srctl/srctl.git
+git clone https://github.com/akrishnanDG/srctl.git
 cd srctl
 make build
 # or: go build -o srctl .
@@ -64,9 +70,47 @@ make build
 ### Verify Installation
 
 ```bash
-srctl --help
+srctl --version
 srctl health --url https://your-sr-url --username API_KEY --password API_SECRET
 ```
+
+### Use as a Confluent CLI Plugin
+
+The [Confluent CLI](https://docs.confluent.io/confluent-cli/current/overview.html)
+auto-discovers any executable named `confluent-*` on your `$PATH` and exposes it
+as a built-in command (each dash becomes a subcommand). Because `srctl` parses
+its own flags, you can run it as `confluent srctl ...` with no code changes —
+just install the binary under the right name:
+
+```bash
+# Build and install as a plugin (defaults to $GOPATH/bin)
+make install-plugin
+
+# Or pick any directory already on your $PATH
+make install-plugin PLUGIN_DIR=$HOME/bin
+
+# Manual alternative (symlink an existing srctl binary)
+ln -s "$(command -v srctl)" /usr/local/bin/confluent-srctl
+```
+
+Then invoke it through the Confluent CLI:
+
+```bash
+confluent srctl --help
+confluent srctl health
+confluent srctl list
+confluent srctl backup --output ./backup
+```
+
+Verify the plugin is discovered:
+
+```bash
+confluent plugin list   # should show 'confluent srctl'
+```
+
+`srctl` still manages its own connection (config file, env vars, or
+`--url/--username/--password` flags) — see [Configuration](#configuration).
+Running it as a plugin only changes how it's invoked, not how it authenticates.
 
 ## Quick Start
 
@@ -95,7 +139,7 @@ srctl diff my-topic-value@1 my-topic-value@2
 
 ### Configuration File
 
-Copy `srctl.example.yaml` to `~/.srctl/srctl.yaml` or `./srctl.yaml` and fill in your credentials:
+Copy `srctl.example.yaml` to `~/.srctl/srctl.yaml` and fill in your credentials. The config file is created with restricted permissions (`0600`) since it may contain secrets:
 
 ```yaml
 registries:
@@ -359,7 +403,7 @@ srctl replicate --source on-prem --target ccloud \
   --kafka-brokers broker1:9092 \
   --filter "user-*"
 
-# With Prometheus metrics endpoint
+# With Prometheus metrics endpoint (binds to 127.0.0.1)
 srctl replicate --source on-prem --target ccloud \
   --kafka-brokers broker1:9092 \
   --metrics-port 9090
@@ -394,7 +438,7 @@ srctl replicate --source on-prem --target ccloud \
 **Monitoring:**
 
 - **CLI status** — Periodic one-line status printed to terminal (configurable with `--status-interval`)
-- **Prometheus** — Optional `/metrics` HTTP endpoint (enabled with `--metrics-port`)
+- **Prometheus** — Optional `/metrics` HTTP endpoint on `127.0.0.1` (enabled with `--metrics-port`)
 
 Available Prometheus metrics:
 ```
@@ -622,15 +666,11 @@ cat samples.jsonl | srctl generate --name Event
 # Get data contract rules
 srctl contract get user-events
 
-# Set rules from file
-srctl contract set user-events --rules rules.json
-
 # Validate schema against rules
 srctl contract validate user-events --schema schema.avsc
-
-# Delete data contract rules
-srctl contract delete user-events
 ```
+
+> **Note:** `contract set` and `contract delete` are not yet implemented and will return an error. They require Schema Registry rules API support.
 
 ### Schema Versions & Evolution
 
@@ -788,6 +828,8 @@ srctl dangling -o json                      # Find broken references
 -c, --context string    Schema Registry context (e.g., '.mycontext')
 -o, --output string     Output format: table, json, yaml, plain (default "table")
 ```
+
+> **Security note:** The `--password` and `--username` flags are visible in process listings (`ps`). For production and CI/CD use, prefer environment variables (`SCHEMA_REGISTRY_URL`, `SCHEMA_REGISTRY_BASIC_AUTH_USER_INFO`) or the config file (`~/.srctl/srctl.yaml`). The config file is created with `0600` permissions to protect credentials.
 
 ## Exit Codes
 

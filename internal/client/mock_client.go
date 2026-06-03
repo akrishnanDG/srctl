@@ -2,6 +2,7 @@ package client
 
 import (
 	"fmt"
+	"sort"
 	"sync"
 )
 
@@ -139,6 +140,8 @@ func (m *MockSchemaRegistryClient) GetVersions(subject string, includeDeleted bo
 	for i, s := range schemas {
 		versions[i] = s.Version
 	}
+	// Match real client: return versions in ascending order.
+	sort.Ints(versions)
 	return versions, nil
 }
 

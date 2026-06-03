@@ -4,7 +4,7 @@
 
 ### Prerequisites
 
-- Go 1.21+
+- Go 1.24+
 - Docker and Docker Compose (for integration tests)
 - golangci-lint (optional, for linting)
 
@@ -71,12 +71,13 @@ srctl/
 │   ├── generate.go            # generate command
 │   ├── export.go              # export command
 │   ├── import.go              # import command
-│   ├── backup.go              # backup command
-│   ├── compare.go             # compare command
+│   ├── backup.go              # backup, restore commands
+│   ├── compare.go             # compare, clone commands
 │   ├── contract.go            # contract command
 │   ├── config.go              # config command
 │   ├── stats.go               # stats, health commands
 │   ├── dangling.go            # dangling command
+│   ├── replicate.go           # replicate command
 │   └── *_test.go              # Tests
 ├── internal/
 │   ├── client/                # Schema Registry HTTP client
@@ -85,8 +86,17 @@ srctl/
 │   │   └── mock_client.go     # Mock for testing
 │   ├── config/                # Configuration (Viper)
 │   │   └── config.go
-│   └── output/                # Output formatting
-│       └── output.go
+│   ├── kafka/                 # Kafka consumer and schema parsing
+│   │   ├── consumer.go        # Kafka consumer implementation
+│   │   ├── parser.go          # Schema parser
+│   │   └── parser_test.go     # Parser tests
+│   ├── output/                # Output formatting
+│   │   └── output.go
+│   └── replicator/            # Continuous schema replication
+│       ├── replicator.go      # Replicator implementation
+│       ├── metrics.go         # Replication metrics
+│       ├── status.go          # Replication status tracking
+│       └── replicator_test.go # Replicator tests
 ├── examples/                  # Sample schemas and demos
 │   └── split-demo/            # Schema splitting demo
 ├── docs/                      # Documentation

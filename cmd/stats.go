@@ -6,7 +6,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"sync/atomic"
 
 	"github.com/schollz/progressbar/v3"
 	"github.com/spf13/cobra"
@@ -218,7 +217,6 @@ func runStats(cmd *cobra.Command, args []string) error {
 		}
 
 		stats.TotalVersions += r.VersionCount
-		stats.TotalSubjects++
 		subjectVersionCounts[r.Subject] = r.VersionCount
 		subjectSizes[r.Subject] = r.TotalSize
 
@@ -428,12 +426,12 @@ func runStats(cmd *cobra.Command, args []string) error {
 
 // analyzeSubjectsParallel analyzes subjects using a worker pool
 func analyzeSubjectsParallel(c *client.SchemaRegistryClient, subjects []string, numWorkers int) []subjectResult {
+	numWorkers = clampWorkers(numWorkers)
 	// Create channels
 	jobs := make(chan string, len(subjects))
 	results := make(chan subjectResult, len(subjects))
 
 	// Progress tracking
-	var completed int64
 	bar := progressbar.NewOptions(len(subjects),
 		progressbar.OptionSetDescription("Analyzing"),
 		progressbar.OptionShowCount(),
@@ -450,7 +448,6 @@ func analyzeSubjectsParallel(c *client.SchemaRegistryClient, subjects []string, 
 			for subject := range jobs {
 				result := analyzeSubject(c, subject)
 				results <- result
-				atomic.AddInt64(&completed, 1)
 				bar.Add(1)
 			}
 		}()

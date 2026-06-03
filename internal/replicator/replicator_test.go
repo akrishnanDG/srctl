@@ -1,6 +1,7 @@
 package replicator
 
 import (
+	"context"
 	"fmt"
 	"sync"
 	"testing"
@@ -26,7 +27,7 @@ func TestApplySchemaEvent(t *testing.T) {
 		SchemaType: "AVRO",
 	}
 
-	err := r.applyEvent(nil, event)
+	err := r.applyEvent(context.Background(), event)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -56,7 +57,7 @@ func TestApplySchemaEvent_PreserveIDs(t *testing.T) {
 		SchemaType: "AVRO",
 	}
 
-	err := r.applyEvent(nil, event)
+	err := r.applyEvent(context.Background(), event)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -89,7 +90,7 @@ func TestApplySchemaEvent_WithReferences(t *testing.T) {
 		},
 	}
 
-	err := r.applyEvent(nil, event)
+	err := r.applyEvent(context.Background(), event)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -121,7 +122,7 @@ func TestApplySchemaEvent_Deleted(t *testing.T) {
 		Deleted: true,
 	}
 
-	err := r.applyEvent(nil, event)
+	err := r.applyEvent(context.Background(), event)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -144,7 +145,7 @@ func TestApplySchemaEvent_Tombstone(t *testing.T) {
 		Tombstone: true,
 	}
 
-	err := r.applyEvent(nil, event)
+	err := r.applyEvent(context.Background(), event)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -166,7 +167,7 @@ func TestApplySchemaEvent_DeleteNotFound(t *testing.T) {
 		Tombstone: true,
 	}
 
-	err := r.applyEvent(nil, event)
+	err := r.applyEvent(context.Background(), event)
 	if err != nil {
 		t.Fatalf("unexpected error (should be ignored for not found): %v", err)
 	}
@@ -182,7 +183,7 @@ func TestApplyConfigEvent_Subject(t *testing.T) {
 		Compatibility: "FULL_TRANSITIVE",
 	}
 
-	err := r.applyEvent(nil, event)
+	err := r.applyEvent(context.Background(), event)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -202,7 +203,7 @@ func TestApplyConfigEvent_Global(t *testing.T) {
 		Compatibility: "BACKWARD",
 	}
 
-	err := r.applyEvent(nil, event)
+	err := r.applyEvent(context.Background(), event)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -222,7 +223,7 @@ func TestApplyModeEvent_Subject(t *testing.T) {
 		Mode:    "READONLY",
 	}
 
-	err := r.applyEvent(nil, event)
+	err := r.applyEvent(context.Background(), event)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -243,7 +244,7 @@ func TestApplyModeEvent_GlobalSkipped(t *testing.T) {
 		Mode:    "READWRITE",
 	}
 
-	err := r.applyEvent(nil, event)
+	err := r.applyEvent(context.Background(), event)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -267,7 +268,7 @@ func TestApplyDeleteEvent(t *testing.T) {
 		Subject: "deleted-value",
 	}
 
-	err := r.applyEvent(nil, event)
+	err := r.applyEvent(context.Background(), event)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -286,7 +287,7 @@ func TestApplyDeleteEvent_NotFound(t *testing.T) {
 		Subject: "nonexistent",
 	}
 
-	err := r.applyEvent(nil, event)
+	err := r.applyEvent(context.Background(), event)
 	if err != nil {
 		t.Fatalf("unexpected error (not found should be ignored): %v", err)
 	}
@@ -308,7 +309,7 @@ func TestApplySchemaEvent_RegisterError(t *testing.T) {
 		SchemaType: "AVRO",
 	}
 
-	err := r.applyEvent(nil, event)
+	err := r.applyEvent(context.Background(), event)
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}

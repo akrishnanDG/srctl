@@ -40,3 +40,19 @@ srctl.yaml
 # Temporary files
 tmp/
 temp/
+
+# Shell completions output
+completions/
+
+# Go vendor directory
+vendor/
+
+# Delve debugger binary
+__debug_bin*
+
+# Release archives
+*.tar.gz
+*.zip
+
+# Local test infrastructure
+docker-compose.test.yml

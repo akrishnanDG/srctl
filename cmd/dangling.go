@@ -5,7 +5,7 @@ import (
 	"sort"
 	"strconv"
 	"sync"
-	"sync/atomic"
+
 
 	"github.com/schollz/progressbar/v3"
 	"github.com/spf13/cobra"
@@ -215,12 +215,12 @@ type danglingResult struct {
 }
 
 func analyzeDanglingParallel(c *client.SchemaRegistryClient, subjects []string, activeMap map[string]bool, workers int) DanglingReport {
+	workers = clampWorkers(workers)
 	// Create channels
 	jobs := make(chan string, len(subjects))
 	resultChan := make(chan danglingResult, len(subjects))
 
 	// Progress bar
-	var completed int64
 	bar := progressbar.NewOptions(len(subjects),
 		progressbar.OptionSetDescription("Analyzing"),
 		progressbar.OptionShowCount(),
@@ -237,7 +237,6 @@ func analyzeDanglingParallel(c *client.SchemaRegistryClient, subjects []string, 
 			for subject := range jobs {
 				result := analyzeDanglingSubject(c, subject, activeMap)
 				resultChan <- result
-				atomic.AddInt64(&completed, 1)
 				bar.Add(1)
 			}
 		}()

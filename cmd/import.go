@@ -268,6 +268,11 @@ func parseSchemaFile(rootPath, filePath string) (schemaToImport, error) {
 	return schema, nil
 }
 
+const (
+	maxArchiveEntrySize = 100 * 1024 * 1024  // 100 MB per entry
+	maxArchiveTotalSize = 1024 * 1024 * 1024 // 1 GB total
+)
+
 func readFromTar(tarPath string) ([]schemaToImport, error) {
 	var schemas []schemaToImport
 
@@ -287,6 +292,7 @@ func readFromTar(tarPath string) ([]schemaToImport, error) {
 
 	schemaFiles := make(map[string]string)   // path -> content
 	metadataFiles := make(map[string]string) // path -> content
+	var totalSize int64
 
 	for {
 		header, err := tarReader.Next()
@@ -301,9 +307,26 @@ func readFromTar(tarPath string) ([]schemaToImport, error) {
 			continue
 		}
 
-		content, err := io.ReadAll(tarReader)
+		// Reject path traversal in entry names
+		if strings.Contains(header.Name, "..") {
+			return nil, fmt.Errorf("tar entry contains path traversal: %s", header.Name)
+		}
+
+		if header.Size > maxArchiveEntrySize {
+			return nil, fmt.Errorf("tar entry %s exceeds maximum size (%d bytes)", header.Name, maxArchiveEntrySize)
+		}
+
+		totalSize += header.Size
+		if totalSize > maxArchiveTotalSize {
+			return nil, fmt.Errorf("archive exceeds maximum total size (%d bytes)", maxArchiveTotalSize)
+		}
+
+		content, err := io.ReadAll(io.LimitReader(tarReader, maxArchiveEntrySize+1))
 		if err != nil {
 			return nil, err
+		}
+		if int64(len(content)) > maxArchiveEntrySize {
+			return nil, fmt.Errorf("tar entry %s exceeds maximum size", header.Name)
 		}
 
 		if strings.Contains(header.Name, ".metadata.") {
@@ -337,10 +360,25 @@ func readFromZip(zipPath string) ([]schemaToImport, error) {
 
 	schemaFiles := make(map[string]string)
 	metadataFiles := make(map[string]string)
+	var totalSize uint64
 
 	for _, file := range reader.File {
 		if file.FileInfo().IsDir() {
 			continue
+		}
+
+		// Reject path traversal in entry names
+		if strings.Contains(file.Name, "..") {
+			return nil, fmt.Errorf("zip entry contains path traversal: %s", file.Name)
+		}
+
+		if file.UncompressedSize64 > uint64(maxArchiveEntrySize) {
+			return nil, fmt.Errorf("zip entry %s exceeds maximum size (%d bytes)", file.Name, maxArchiveEntrySize)
+		}
+
+		totalSize += file.UncompressedSize64
+		if totalSize > uint64(maxArchiveTotalSize) {
+			return nil, fmt.Errorf("archive exceeds maximum total size (%d bytes)", maxArchiveTotalSize)
 		}
 
 		rc, err := file.Open()
@@ -348,10 +386,13 @@ func readFromZip(zipPath string) ([]schemaToImport, error) {
 			continue
 		}
 
-		content, err := io.ReadAll(rc)
+		content, err := io.ReadAll(io.LimitReader(rc, maxArchiveEntrySize+1))
 		rc.Close()
 		if err != nil {
 			continue
+		}
+		if int64(len(content)) > maxArchiveEntrySize {
+			return nil, fmt.Errorf("zip entry %s exceeds maximum size", file.Name)
 		}
 
 		if strings.Contains(file.Name, ".metadata.") {
@@ -518,17 +559,6 @@ func sortSchemasByDependencies(schemas []schemaToImport) {
 	}
 
 	// Topological sort using Kahn's algorithm
-	// Count incoming edges (how many subjects depend on each subject)
-	inDegree := make(map[string]int)
-	for subj := range subjectSchemas {
-		inDegree[subj] = 0
-	}
-	for _, depSet := range deps {
-		for dep := range depSet {
-			inDegree[dep]++ // This subject is depended upon
-		}
-	}
-
 	// Start with subjects that have no dependencies
 	var queue []string
 	for subj := range subjectSchemas {
