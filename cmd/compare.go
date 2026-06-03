@@ -506,18 +506,32 @@ func runClone(cmd *cobra.Command, args []string) error {
 		output.Info("Target context: %s", cloneTargetContext)
 	}
 
-	// Set IMPORT mode if preserving IDs
+	// Set IMPORT mode if preserving IDs.
+	// Global IMPORT mode is best-effort: Confluent SR only permits global
+	// mode=IMPORT when the registry has no subjects (error 42205 otherwise).
+	// On a non-empty target we fall back to the per-subject IMPORT mode set in
+	// the clone worker loop, which works regardless of existing subjects.
 	if !cloneNoPreserveIDs {
 		output.Step("Setting target registry to IMPORT mode...")
+		globalImportSet := false
 		if err := targetClient.SetMode("IMPORT"); err != nil {
-			return fmt.Errorf("failed to set IMPORT mode (required for --preserve-ids): %w", err)
-		}
-		defer func() {
-			output.Step("Restoring READWRITE mode...")
-			if err := targetClient.SetMode("READWRITE"); err != nil {
-				output.Error("Failed to restore READWRITE mode; target registry may be stuck in IMPORT mode: %v", err)
+			errMsg := err.Error()
+			if strings.Contains(errMsg, "found existing subjects") || strings.Contains(errMsg, "42205") {
+				output.Warning("Could not set global IMPORT mode because the target registry already contains subjects; falling back to per-subject IMPORT mode for ID preservation: %v", err)
+			} else {
+				return fmt.Errorf("failed to set IMPORT mode (required for --preserve-ids): %w", err)
 			}
-		}()
+		} else {
+			globalImportSet = true
+		}
+		if globalImportSet {
+			defer func() {
+				output.Step("Restoring READWRITE mode...")
+				if err := targetClient.SetMode("READWRITE"); err != nil {
+					output.Error("Failed to restore READWRITE mode; target registry may be stuck in IMPORT mode: %v", err)
+				}
+			}()
+		}
 	}
 
 	// Get subjects to clone
