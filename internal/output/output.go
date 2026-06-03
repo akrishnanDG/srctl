@@ -147,6 +147,37 @@ var (
 	Bold    = color.New(color.Bold).SprintFunc()
 )
 
+// stderr-specific colorizers. fatih/color auto-detects a TTY based on stdout,
+// so when stderr is redirected (but stdout is a terminal) the codes above would
+// still leak escape sequences into stderr. These respect stderr's own TTY state.
+var (
+	stderrIsTTY = isTerminal(os.Stderr)
+
+	redStderr    = newStderrColorFunc(color.FgRed)
+	yellowStderr = newStderrColorFunc(color.FgYellow)
+)
+
+// isTerminal reports whether f is attached to a character device (a terminal).
+// Uses os.Stat to avoid pulling in an external terminal-detection dependency.
+func isTerminal(f *os.File) bool {
+	fi, err := f.Stat()
+	if err != nil {
+		return false
+	}
+	return fi.Mode()&os.ModeCharDevice != 0
+}
+
+// newStderrColorFunc returns a SprintFunc that colorizes only when stderr is a
+// terminal, otherwise it returns the plain text.
+func newStderrColorFunc(attr color.Attribute) func(a ...interface{}) string {
+	if !stderrIsTTY {
+		return fmt.Sprint
+	}
+	c := color.New(attr)
+	c.EnableColor()
+	return c.SprintFunc()
+}
+
 // Success prints a success message
 func Success(format string, args ...interface{}) {
 	fmt.Printf("%s %s\n", Green("✓"), fmt.Sprintf(format, args...))
@@ -154,12 +185,12 @@ func Success(format string, args ...interface{}) {
 
 // Error prints an error message to stderr
 func Error(format string, args ...interface{}) {
-	fmt.Fprintf(os.Stderr, "%s %s\n", Red("✗"), fmt.Sprintf(format, args...))
+	fmt.Fprintf(os.Stderr, "%s %s\n", redStderr("✗"), fmt.Sprintf(format, args...))
 }
 
 // Warning prints a warning message to stderr
 func Warning(format string, args ...interface{}) {
-	fmt.Fprintf(os.Stderr, "%s %s\n", Yellow("⚠"), fmt.Sprintf(format, args...))
+	fmt.Fprintf(os.Stderr, "%s %s\n", yellowStderr("⚠"), fmt.Sprintf(format, args...))
 }
 
 // Info prints an info message

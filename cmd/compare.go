@@ -514,7 +514,9 @@ func runClone(cmd *cobra.Command, args []string) error {
 		}
 		defer func() {
 			output.Step("Restoring READWRITE mode...")
-			targetClient.SetMode("READWRITE")
+			if err := targetClient.SetMode("READWRITE"); err != nil {
+				output.Error("Failed to restore READWRITE mode; target registry may be stuck in IMPORT mode: %v", err)
+			}
 		}()
 	}
 
@@ -874,8 +876,9 @@ func cloneSchemasParallel(targetClient *client.SchemaRegistryClient, schemas []s
 	)
 
 	// Start workers
+	workers := clampWorkers(cloneWorkers)
 	var wg sync.WaitGroup
-	for i := 0; i < cloneWorkers; i++ {
+	for i := 0; i < workers; i++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
