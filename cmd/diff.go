@@ -70,7 +70,7 @@ func runDiff(cmd *cobra.Command, args []string) error {
 	}
 
 	// Parse arguments
-	if len(args) == 0 && diffSchemaID1 == 0 {
+	if len(args) == 0 {
 		return fmt.Errorf("please provide subject name(s) or use --id flag")
 	}
 
@@ -162,8 +162,12 @@ func showDiff(schema1, schema2 *client.Schema, name1, ver1, name2, ver2 string) 
 
 	// Parse schemas for structured diff
 	var parsed1, parsed2 interface{}
-	json.Unmarshal([]byte(schema1.Schema), &parsed1)
-	json.Unmarshal([]byte(schema2.Schema), &parsed2)
+	if err := json.Unmarshal([]byte(schema1.Schema), &parsed1); err != nil {
+		output.Warning("Failed to parse first schema as JSON: %v", err)
+	}
+	if err := json.Unmarshal([]byte(schema2.Schema), &parsed2); err != nil {
+		output.Warning("Failed to parse second schema as JSON: %v", err)
+	}
 
 	// Compare basic properties
 	type1 := schema1.SchemaType
@@ -269,10 +273,7 @@ func diffAvroSchemas(schema1, schema2 interface{}) error {
 		output.Warning("Removing fields may break backward compatibility")
 	}
 	if len(added) > 0 {
-		hasDefaults := true // Simplified check
-		if hasDefaults {
-			output.Info("Added fields - check if they have defaults for backward compatibility")
-		}
+		output.Info("Added fields - check if they have defaults for backward compatibility")
 	}
 	if len(removed) == 0 && len(modified) == 0 {
 		output.Success("Changes appear to be backward compatible")

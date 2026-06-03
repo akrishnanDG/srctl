@@ -1,7 +1,7 @@
 package cmd
 
 import (
-	gocontext "context"
+	"context"
 	"fmt"
 	"os"
 	"os/signal"
@@ -201,7 +201,7 @@ func runReplicate(cmd *cobra.Command, args []string) error {
 	}
 
 	// Build context with signal handling for graceful shutdown
-	ctx, cancel := gocontext.WithCancel(gocontext.Background())
+	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
 	sigCh := make(chan os.Signal, 1)

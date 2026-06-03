@@ -145,13 +145,6 @@ func runRegister(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("schema is not compatible")
 		}
 
-		// Show diff with latest
-		output.SubHeader("Comparing with latest version...")
-		latestSchema, err := c.GetSchema(subject, "latest")
-		if err == nil {
-			showSchemaDiff(latestSchema.Schema, schemaContent)
-		}
-
 		return nil
 	}
 
@@ -185,7 +178,7 @@ func runRegister(cmd *cobra.Command, args []string) error {
 		"subject": subject,
 		"id":      id,
 		"type":    schemaType,
-		"context": context,
+		"context": srContext,
 		"message": "Schema registered successfully",
 	})
 }
@@ -279,8 +272,3 @@ func normalizeAvroSchema(content string) (string, error) {
 	return string(normalized), nil
 }
 
-func showSchemaDiff(old, new string) {
-	// Simple placeholder for diff visualization
-	// A full implementation would use a proper diff library
-	output.Info("Schema diff visualization would be shown here")
-}

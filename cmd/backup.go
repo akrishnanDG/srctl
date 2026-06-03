@@ -163,7 +163,7 @@ func runBackup(cmd *cobra.Command, args []string) error {
 		Version:     "1.0",
 		CreatedAt:   time.Now().UTC(),
 		RegistryURL: registryURL,
-		Context:     context,
+		Context:     srContext,
 		BySchemaID:  backupByID,
 	}
 
@@ -197,19 +197,25 @@ func runBackup(cmd *cobra.Command, args []string) error {
 		if configData["compatibility"] == "" {
 			configData["compatibility"] = globalConfig.Compatibility
 		}
-		saveJSON(filepath.Join(backupDir, "global-config.json"), configData)
+		if err := saveJSON(filepath.Join(backupDir, "global-config.json"), configData); err != nil {
+			return fmt.Errorf("failed to save global config: %w", err)
+		}
 	}
 
 	// Backup global mode
 	globalMode, err := c.GetMode()
 	if err == nil && globalMode != nil {
 		modeData := map[string]string{"mode": globalMode.Mode}
-		saveJSON(filepath.Join(backupDir, "global-mode.json"), modeData)
+		if err := saveJSON(filepath.Join(backupDir, "global-mode.json"), modeData); err != nil {
+			return fmt.Errorf("failed to save global mode: %w", err)
+		}
 	}
 
 	// Backup subjects in parallel
 	subjectsDir := filepath.Join(backupDir, "subjects")
-	os.MkdirAll(subjectsDir, 0755)
+	if err := os.MkdirAll(subjectsDir, 0755); err != nil {
+		return fmt.Errorf("failed to create subjects directory: %w", err)
+	}
 
 	output.Step("Backing up schemas (%d workers)...", backupWorkers)
 	backupResults := backupSubjectsParallel(c, subjects, subjectsDir)
@@ -237,11 +243,15 @@ func runBackup(cmd *cobra.Command, args []string) error {
 	// Save ID mappings if requested
 	if backupByID && len(idMappings) > 0 {
 		output.Step("Saving schema ID mappings...")
-		saveJSON(filepath.Join(backupDir, "id-mappings.json"), idMappings)
+		if err := saveJSON(filepath.Join(backupDir, "id-mappings.json"), idMappings); err != nil {
+			return fmt.Errorf("failed to save ID mappings: %w", err)
+		}
 
 		// Also save schemas by ID for direct restoration
 		output.Step("Saving schemas by ID...")
-		saveSchemasByIDParallel(c, idMappings, backupDir)
+		if err := saveSchemasByIDParallel(c, idMappings, backupDir); err != nil {
+			return fmt.Errorf("failed to save schemas by ID: %w", err)
+		}
 	}
 
 	// Backup tags if enabled
@@ -259,7 +269,9 @@ func runBackup(cmd *cobra.Command, args []string) error {
 	manifest.Statistics.TagDefinitions = tagDefCount
 	manifest.Statistics.TagAssignments = tagAssignCount
 
-	saveJSON(filepath.Join(backupDir, "manifest.json"), manifest)
+	if err := saveJSON(filepath.Join(backupDir, "manifest.json"), manifest); err != nil {
+		return fmt.Errorf("failed to save manifest: %w", err)
+	}
 
 	// Summary
 	output.Header("Backup Complete")
@@ -364,9 +376,11 @@ func backupSubjectsParallel(c *client.SchemaRegistryClient, subjects []string, s
 }
 
 // saveSchemasByIDParallel saves schemas by ID in parallel
-func saveSchemasByIDParallel(c *client.SchemaRegistryClient, mappings []IDMapping, backupDir string) {
+func saveSchemasByIDParallel(c *client.SchemaRegistryClient, mappings []IDMapping, backupDir string) error {
 	schemasDir := filepath.Join(backupDir, "schemas-by-id")
-	os.MkdirAll(schemasDir, 0755)
+	if err := os.MkdirAll(schemasDir, 0755); err != nil {
+		return fmt.Errorf("failed to create schemas-by-id directory: %w", err)
+	}
 
 	// Deduplicate by ID
 	uniqueIDs := make(map[int]IDMapping)
@@ -411,6 +425,7 @@ func saveSchemasByIDParallel(c *client.SchemaRegistryClient, mappings []IDMappin
 	close(jobs)
 	wg.Wait()
 	bar.Finish()
+	return nil
 }
 
 // backupTagsData backs up tag definitions and assignments
@@ -511,7 +526,9 @@ func backupTagsData(c *client.SchemaRegistryClient, subjects []string, backupDir
 	bar.Finish()
 
 	// Save tag backup
-	saveJSON(filepath.Join(backupDir, "tags.json"), tagBackup)
+	if err := saveJSON(filepath.Join(backupDir, "tags.json"), tagBackup); err != nil {
+		output.Warning("Failed to save tags backup: %v", err)
+	}
 
 	return len(tagBackup.Definitions), len(tagBackup.Assignments)
 }
@@ -582,7 +599,7 @@ func saveJSON(path string, data interface{}) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, content, 0644)
+	return os.WriteFile(path, content, 0600)
 }
 
 func getDirSize(path string) (int64, error) {
@@ -911,18 +928,6 @@ func sortBackupsByDependencies(backups []SubjectBackup) {
 	}
 
 	// Topological sort using Kahn's algorithm
-	inDegree := make(map[string]int)
-	for subj := range subjectIndex {
-		inDegree[subj] = 0
-	}
-	for _, depSet := range deps {
-		for dep := range depSet {
-			if _, exists := subjectIndex[dep]; exists {
-				inDegree[dep]++
-			}
-		}
-	}
-
 	// Start with subjects that have no dependencies
 	var queue []string
 	for subj := range subjectIndex {

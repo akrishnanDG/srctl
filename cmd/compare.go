@@ -80,6 +80,7 @@ type CompareResult struct {
 	TargetVers   int
 	SourceLatest int
 	TargetLatest int
+	Error        string // non-empty if comparison failed for this subject
 }
 
 func runCompare(cmd *cobra.Command, args []string) error {
@@ -248,6 +249,7 @@ func compareSubjectsParallel(
 		subjectList = append(subjectList, s)
 	}
 
+	workers := clampWorkers(compareWorkers)
 	jobs := make(chan string, len(subjectList))
 	results := make(chan CompareResult, len(subjectList))
 
@@ -260,7 +262,7 @@ func compareSubjectsParallel(
 
 	// Start workers
 	var wg sync.WaitGroup
-	for i := 0; i < compareWorkers; i++ {
+	for i := 0; i < workers; i++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
@@ -276,8 +278,25 @@ func compareSubjectsParallel(
 					result.TargetOnly = true
 				} else {
 					// Both exist - compare details
-					sourceVersions, _ := sourceClient.GetVersions(subj, false)
-					targetVersions, _ := targetClient.GetVersions(subj, false)
+					sourceVersions, svErr := sourceClient.GetVersions(subj, false)
+					targetVersions, tvErr := targetClient.GetVersions(subj, false)
+
+					if svErr != nil || tvErr != nil {
+						errMsg := ""
+						if svErr != nil {
+							errMsg = fmt.Sprintf("source: %v", svErr)
+						}
+						if tvErr != nil {
+							if errMsg != "" {
+								errMsg += "; "
+							}
+							errMsg += fmt.Sprintf("target: %v", tvErr)
+						}
+						result.Error = errMsg
+						results <- result
+						bar.Add(1)
+						continue
+					}
 
 					result.SourceVers = len(sourceVersions)
 					result.TargetVers = len(targetVersions)
@@ -291,22 +310,27 @@ func compareSubjectsParallel(
 						result.SourceLatest = sourceVersions[len(sourceVersions)-1]
 						result.TargetLatest = targetVersions[len(targetVersions)-1]
 
-						if compareByID {
-							// Compare by schema ID
-							sourceSchema, _ := sourceClient.GetSchema(subj, "latest")
-							targetSchema, _ := targetClient.GetSchema(subj, "latest")
+						sourceSchema, ssErr := sourceClient.GetSchema(subj, "latest")
+						targetSchema, tsErr := targetClient.GetSchema(subj, "latest")
 
-							if sourceSchema != nil && targetSchema != nil {
+						if ssErr != nil || tsErr != nil {
+							errMsg := ""
+							if ssErr != nil {
+								errMsg = fmt.Sprintf("source schema: %v", ssErr)
+							}
+							if tsErr != nil {
+								if errMsg != "" {
+									errMsg += "; "
+								}
+								errMsg += fmt.Sprintf("target schema: %v", tsErr)
+							}
+							result.Error = errMsg
+						} else {
+							if compareByID {
 								if sourceSchema.ID != targetSchema.ID {
 									result.SchemaDiff = true
 								}
-							}
-						} else {
-							// Compare by content
-							sourceSchema, _ := sourceClient.GetSchema(subj, "latest")
-							targetSchema, _ := targetClient.GetSchema(subj, "latest")
-
-							if sourceSchema != nil && targetSchema != nil {
+							} else {
 								if sourceSchema.Schema != targetSchema.Schema {
 									result.SchemaDiff = true
 								}

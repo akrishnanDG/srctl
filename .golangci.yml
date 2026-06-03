@@ -16,7 +16,7 @@ linters:
   disable:
     - exhaustive
     - wrapcheck
-    - gomnd
+    - mnd
     - funlen
     - cyclop
     - gocognit
@@ -25,8 +25,7 @@ linters-settings:
   errcheck:
     check-type-assertions: false
     check-blank: false
-  govet:
-    check-shadowing: false
+  govet: {}
   misspell:
     locale: US
   gofmt:
@@ -34,14 +33,9 @@ linters-settings:
 
 issues:
   exclude-rules:
-    # Allow fmt.Printf in cmd/ (CLI output)
-    - path: cmd/
-      linters:
-        - forbidigo
     # Test files can be more relaxed
     - path: _test\.go
       linters:
         - errcheck
-        - gosec
   max-issues-per-linter: 50
   max-same-issues: 10

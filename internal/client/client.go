@@ -102,6 +102,16 @@ func NewClient(baseURL string, auth *AuthConfig) *SchemaRegistryClient {
 		BaseURL: strings.TrimRight(baseURL, "/"),
 		HTTPClient: &http.Client{
 			Timeout: 30 * time.Second,
+			CheckRedirect: func(req *http.Request, via []*http.Request) error {
+				// Prevent forwarding credentials to a different host on redirect
+				if len(via) > 0 && req.URL.Host != via[0].URL.Host {
+					return fmt.Errorf("redirect to different host blocked: %s -> %s", via[0].URL.Host, req.URL.Host)
+				}
+				if len(via) >= 10 {
+					return fmt.Errorf("too many redirects")
+				}
+				return nil
+			},
 		},
 		Auth:    auth,
 		Context: "",
@@ -154,7 +164,8 @@ func (c *SchemaRegistryClient) doRequest(method, urlPath string, body interface{
 	}
 	defer resp.Body.Close()
 
-	respBody, err := io.ReadAll(resp.Body)
+	const maxResponseSize = 50 * 1024 * 1024 // 50 MB
+	respBody, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseSize))
 	if err != nil {
 		return nil, resp.StatusCode, fmt.Errorf("failed to read response body: %w", err)
 	}
@@ -236,7 +247,7 @@ func (c *SchemaRegistryClient) GetSchema(subject string, version string) (*Schem
 
 // GetSchemaWithDeleted returns a schema, optionally including deleted schemas
 func (c *SchemaRegistryClient) GetSchemaWithDeleted(subject string, version string, includeDeleted bool) (*Schema, error) {
-	urlPath := c.buildURL(fmt.Sprintf("/subjects/%s/versions/%s", url.PathEscape(subject), version))
+	urlPath := c.buildURL(fmt.Sprintf("/subjects/%s/versions/%s", url.PathEscape(subject), url.PathEscape(version)))
 	if includeDeleted {
 		urlPath += "?deleted=true"
 	}
@@ -395,7 +406,7 @@ func (c *SchemaRegistryClient) DeleteSubject(subject string, permanent bool) ([]
 
 // DeleteVersion deletes a specific version (soft delete by default)
 func (c *SchemaRegistryClient) DeleteVersion(subject string, version string, permanent bool) (int, error) {
-	urlPath := c.buildURL(fmt.Sprintf("/subjects/%s/versions/%s", url.PathEscape(subject), version))
+	urlPath := c.buildURL(fmt.Sprintf("/subjects/%s/versions/%s", url.PathEscape(subject), url.PathEscape(version)))
 	if permanent {
 		urlPath += "?permanent=true"
 	}
@@ -586,7 +597,7 @@ func (c *SchemaRegistryClient) SetSubjectMode(subject string, mode string) error
 
 // CheckCompatibility checks if a schema is compatible with the latest version
 func (c *SchemaRegistryClient) CheckCompatibility(subject string, schema *Schema, version string) (bool, error) {
-	urlPath := c.buildURL(fmt.Sprintf("/compatibility/subjects/%s/versions/%s", url.PathEscape(subject), version))
+	urlPath := c.buildURL(fmt.Sprintf("/compatibility/subjects/%s/versions/%s", url.PathEscape(subject), url.PathEscape(version)))
 
 	reqBody := map[string]interface{}{
 		"schema": schema.Schema,

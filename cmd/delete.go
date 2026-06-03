@@ -140,8 +140,8 @@ func runDelete(cmd *cobra.Command, args []string) error {
 	}
 
 	// Handle force delete context
-	if deleteForce && context != "" && len(args) == 0 && len(deleteSubjects) == 0 {
-		return forceDeleteContextParallel(c, context)
+	if deleteForce && srContext != "" && len(args) == 0 && len(deleteSubjects) == 0 {
+		return forceDeleteContextParallel(c, srContext)
 	}
 
 	// Handle bulk delete multiple subjects
@@ -281,145 +281,6 @@ func forceDeleteSubject(c interface {
 	return nil
 }
 
-func forceDeleteContext(c interface {
-	GetSubjects(bool) ([]string, error)
-	GetVersions(string, bool) ([]int, error)
-	DeleteSubject(string, bool) ([]int, error)
-}, ctx string) error {
-	output.Header("Force Delete Context: %s", ctx)
-	output.Warning("This will PERMANENTLY delete ALL subjects and schemas in context '%s'!", ctx)
-
-	if !deleteYes && !confirmAction("Are you absolutely sure? This cannot be undone!") {
-		output.Info("Cancelled")
-		return nil
-	}
-
-	// Get all subjects in context
-	output.Step("Step 1/4: Fetching all subjects...")
-	subjects, err := c.GetSubjects(true)
-	if err != nil {
-		return fmt.Errorf("failed to get subjects: %w", err)
-	}
-	output.Info("Found %d subjects", len(subjects))
-
-	if len(subjects) == 0 {
-		output.Success("Context is already empty")
-		return nil
-	}
-
-	// Create progress bar
-	bar := progressbar.NewOptions(len(subjects)*2, // x2 for soft + hard delete
-		progressbar.OptionSetDescription("Deleting subjects"),
-		progressbar.OptionShowCount(),
-		progressbar.OptionSetWidth(40),
-		progressbar.OptionClearOnFinish(),
-	)
-
-	var totalVersions int
-
-	// Step 2: Soft delete all subjects
-	output.Step("Step 2/4: Soft deleting all subjects...")
-	for _, subj := range subjects {
-		_, _ = c.DeleteSubject(subj, false)
-		bar.Add(1)
-	}
-
-	// Step 3: Hard delete all subjects
-	output.Step("Step 3/4: Permanently deleting all subjects...")
-	for _, subj := range subjects {
-		versions, err := c.DeleteSubject(subj, true)
-		if err != nil {
-			output.Warning("Failed to delete %s: %v", subj, err)
-		} else {
-			totalVersions += len(versions)
-		}
-		bar.Add(1)
-	}
-
-	bar.Finish()
-
-	// Step 4: Summary
-	output.Step("Step 4/4: Cleanup complete")
-	output.Success("Deleted %d subjects with %d total versions from context '%s'", len(subjects), totalVersions, ctx)
-
-	return nil
-}
-
-func forceDeleteAll(c interface {
-	GetContexts() ([]string, error)
-	GetSubjects(bool) ([]string, error)
-	DeleteSubject(string, bool) ([]int, error)
-}) error {
-	output.Header("⚠️  DANGER: Empty Entire Schema Registry")
-	output.Error("This will PERMANENTLY delete ALL schemas across ALL contexts!")
-
-	if !deleteYes {
-		fmt.Print("\nType 'DELETE EVERYTHING' to confirm: ")
-		reader := bufio.NewReader(os.Stdin)
-		confirmation, _ := reader.ReadString('\n')
-		if strings.TrimSpace(confirmation) != "DELETE EVERYTHING" {
-			output.Info("Cancelled - confirmation text did not match")
-			return nil
-		}
-	}
-
-	// Get all contexts
-	output.Step("Step 1/5: Fetching all contexts...")
-	contexts, err := c.GetContexts()
-	if err != nil {
-		// If contexts API not available, use default context
-		contexts = []string{"."}
-	}
-	output.Info("Found %d contexts", len(contexts))
-
-	// Get all subjects
-	output.Step("Step 2/5: Fetching all subjects...")
-	subjects, err := c.GetSubjects(true)
-	if err != nil {
-		return fmt.Errorf("failed to get subjects: %w", err)
-	}
-	output.Info("Found %d subjects", len(subjects))
-
-	if len(subjects) == 0 {
-		output.Success("Schema Registry is already empty")
-		return nil
-	}
-
-	bar := progressbar.NewOptions(len(subjects)*2,
-		progressbar.OptionSetDescription("Deleting all schemas"),
-		progressbar.OptionShowCount(),
-		progressbar.OptionSetWidth(40),
-		progressbar.OptionClearOnFinish(),
-	)
-
-	var totalVersions int
-
-	// Soft delete all
-	output.Step("Step 3/5: Soft deleting all subjects...")
-	for _, subj := range subjects {
-		_, _ = c.DeleteSubject(subj, false)
-		bar.Add(1)
-	}
-
-	// Hard delete all
-	output.Step("Step 4/5: Permanently deleting all subjects...")
-	for _, subj := range subjects {
-		versions, err := c.DeleteSubject(subj, true)
-		if err == nil {
-			totalVersions += len(versions)
-		}
-		bar.Add(1)
-	}
-
-	bar.Finish()
-
-	// Summary
-	output.Step("Step 5/5: Complete")
-	output.Success("Deleted %d subjects with %d total versions", len(subjects), totalVersions)
-
-	return nil
-}
-
 func keepLatestVersions(c interface {
 	GetVersions(string, bool) ([]int, error)
 	DeleteVersion(string, string, bool) (int, error)
@@ -451,7 +312,7 @@ func keepLatestVersions(c interface {
 	output.Info("Will %s delete: %v", deleteType, toDelete)
 	output.Info("Will keep: %v", toKeep)
 
-	if !deleteYes && !confirmAction(fmt.Sprintf("%s delete %d versions?", strings.Title(deleteType), len(toDelete))) {
+	if !deleteYes && !confirmAction(fmt.Sprintf("%s delete %d versions?", strings.ToUpper(deleteType[:1])+deleteType[1:], len(toDelete))) {
 		output.Info("Cancelled")
 		return nil
 	}
@@ -595,8 +456,8 @@ func purgeSoftDeletedAll(c interface {
 	DeleteVersion(string, string, bool) (int, error)
 }) error {
 	output.Header("Purge All Soft-Deleted Schemas")
-	if context != "" {
-		output.Info("Context: %s", context)
+	if srContext != "" {
+		output.Info("Context: %s", srContext)
 	}
 
 	// Get all subjects including deleted

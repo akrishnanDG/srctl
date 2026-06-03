@@ -1,11 +1,11 @@
-.PHONY: build clean test install fmt lint
+.PHONY: build clean test install install-plugin fmt lint
 
 # Variables
 BINARY_NAME=srctl
 VERSION?=1.0.0
 BUILD_TIME=$(shell date -u '+%Y-%m-%d_%H:%M:%S')
 GIT_COMMIT=$(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
-LDFLAGS=-ldflags "-X main.Version=$(VERSION) -X main.BuildTime=$(BUILD_TIME) -X main.GitCommit=$(GIT_COMMIT)"
+LDFLAGS=-ldflags "-X main.version=$(VERSION) -X main.date=$(BUILD_TIME) -X main.commit=$(GIT_COMMIT)"
 
 # Build
 build:
@@ -25,6 +25,17 @@ build-all: clean
 install: build
 	@echo "Installing $(BINARY_NAME)..."
 	cp $(BINARY_NAME) $(GOPATH)/bin/
+
+# Install as a Confluent CLI plugin (invokable as `confluent srctl ...`).
+# The Confluent CLI discovers any executable named `confluent-*` on $PATH.
+# Override the install dir with: make install-plugin PLUGIN_DIR=/path/on/your/PATH
+PLUGIN_DIR?=$(GOPATH)/bin
+install-plugin: build
+	@echo "Installing $(BINARY_NAME) as Confluent CLI plugin 'confluent-$(BINARY_NAME)' in $(PLUGIN_DIR)..."
+	@mkdir -p $(PLUGIN_DIR)
+	cp $(BINARY_NAME) $(PLUGIN_DIR)/confluent-$(BINARY_NAME)
+	@chmod +x $(PLUGIN_DIR)/confluent-$(BINARY_NAME)
+	@echo "Done. Ensure $(PLUGIN_DIR) is on your \$$PATH, then run: confluent srctl --help"
 
 # Clean build artifacts
 clean:
@@ -82,6 +93,7 @@ help:
 	@echo "  build        - Build the binary"
 	@echo "  build-all    - Build for all platforms"
 	@echo "  install      - Install to GOPATH/bin"
+	@echo "  install-plugin - Install as Confluent CLI plugin (confluent srctl ...)"
 	@echo "  clean        - Remove build artifacts"
 	@echo "  test         - Run tests"
 	@echo "  test-coverage- Run tests with coverage"

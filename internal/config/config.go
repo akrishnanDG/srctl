@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/spf13/viper"
 )
@@ -70,14 +71,20 @@ func LoadConfig() error {
 
 	// Support common SR environment variables
 	if url := os.Getenv("SCHEMA_REGISTRY_URL"); url != "" {
-		viper.SetDefault("registries", []Registry{
-			{
-				Name:     "default",
-				URL:      url,
-				Username: os.Getenv("SCHEMA_REGISTRY_BASIC_AUTH_USER_INFO"),
-				Default:  true,
-			},
-		})
+		reg := Registry{
+			Name:    "default",
+			URL:     url,
+			Default: true,
+		}
+		if authInfo := os.Getenv("SCHEMA_REGISTRY_BASIC_AUTH_USER_INFO"); authInfo != "" {
+			if idx := strings.Index(authInfo, ":"); idx >= 0 {
+				reg.Username = authInfo[:idx]
+				reg.Password = authInfo[idx+1:]
+			} else {
+				reg.Username = authInfo
+			}
+		}
+		viper.SetDefault("registries", []Registry{reg})
 	}
 
 	// Read config file if exists (silently ignore if not found)
@@ -129,7 +136,7 @@ func SaveConfig() error {
 	}
 
 	configDir := filepath.Join(homeDir, ".srctl")
-	if err := os.MkdirAll(configDir, 0755); err != nil {
+	if err := os.MkdirAll(configDir, 0700); err != nil {
 		return fmt.Errorf("failed to create config directory: %w", err)
 	}
 
@@ -141,6 +148,11 @@ func SaveConfig() error {
 
 	if err := viper.WriteConfigAs(configPath); err != nil {
 		return fmt.Errorf("failed to write config file: %w", err)
+	}
+
+	// Restrict permissions since config may contain credentials
+	if err := os.Chmod(configPath, 0600); err != nil {
+		return fmt.Errorf("failed to set config file permissions: %w", err)
 	}
 
 	return nil

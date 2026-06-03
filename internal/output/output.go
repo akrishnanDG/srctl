@@ -152,14 +152,14 @@ func Success(format string, args ...interface{}) {
 	fmt.Printf("%s %s\n", Green("✓"), fmt.Sprintf(format, args...))
 }
 
-// Error prints an error message
+// Error prints an error message to stderr
 func Error(format string, args ...interface{}) {
-	fmt.Printf("%s %s\n", Red("✗"), fmt.Sprintf(format, args...))
+	fmt.Fprintf(os.Stderr, "%s %s\n", Red("✗"), fmt.Sprintf(format, args...))
 }
 
-// Warning prints a warning message
+// Warning prints a warning message to stderr
 func Warning(format string, args ...interface{}) {
-	fmt.Printf("%s %s\n", Yellow("⚠"), fmt.Sprintf(format, args...))
+	fmt.Fprintf(os.Stderr, "%s %s\n", Yellow("⚠"), fmt.Sprintf(format, args...))
 }
 
 // Info prints an info message
@@ -185,6 +185,9 @@ func SubHeader(format string, args ...interface{}) {
 
 // FormatBytes formats bytes to human readable format
 func FormatBytes(bytes int64) string {
+	if bytes < 0 {
+		return "0 B"
+	}
 	const unit = 1024
 	if bytes < unit {
 		return fmt.Sprintf("%d B", bytes)

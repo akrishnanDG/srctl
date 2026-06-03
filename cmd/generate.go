@@ -11,7 +11,6 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
-	"github.com/srctl/srctl/internal/output"
 )
 
 var generateCmd = &cobra.Command{
@@ -308,6 +307,9 @@ func buildAvroFields(fields map[string]*inferredField) []interface{} {
 
 	var avroFields []interface{}
 	for _, name := range names {
+		if name == "" {
+			continue
+		}
 		f := fields[name]
 		field := map[string]interface{}{
 			"name": name,
@@ -558,7 +560,3 @@ func GenerateJSONSchemaFromFields(fields map[string]*inferredField) string {
 	return generateJSONSchemaFromFields(fields)
 }
 
-// needed for output formatting
-func init() {
-	_ = output.NewPrinter("table")
-}

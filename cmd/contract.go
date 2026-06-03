@@ -224,7 +224,7 @@ func runContractSet(cmd *cobra.Command, args []string) error {
 		output.Info("Rule: %s", rule)
 	}
 
-	return nil
+	return fmt.Errorf("contract set is not yet implemented — requires Schema Registry rules API support")
 }
 
 func runContractDelete(cmd *cobra.Command, args []string) error {
@@ -244,10 +244,7 @@ func runContractDelete(cmd *cobra.Command, args []string) error {
 		output.Step("Deleting all rules for subject: %s", subject)
 	}
 
-	// Note: Actual implementation would call the rules API
-	output.Success("Rules deleted (placeholder - requires rules API)")
-
-	return nil
+	return fmt.Errorf("contract delete is not yet implemented — requires Schema Registry rules API support")
 }
 
 func runContractValidate(cmd *cobra.Command, args []string) error {

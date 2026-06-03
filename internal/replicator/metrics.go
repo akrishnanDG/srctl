@@ -109,7 +109,7 @@ func (m *MetricsServer) Start(ctx context.Context) error {
 	mux.Handle("/metrics", promhttp.HandlerFor(m.registry, promhttp.HandlerOpts{}))
 
 	m.server = &http.Server{
-		Addr:    fmt.Sprintf(":%d", m.port),
+		Addr:    fmt.Sprintf("127.0.0.1:%d", m.port),
 		Handler: mux,
 	}
 

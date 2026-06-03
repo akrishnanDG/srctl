@@ -365,7 +365,10 @@ func (r *Replicator) applySchemaEvent(event *kafka.SchemaEvent) error {
 	if r.cfg.PreserveIDs {
 		schema.ID = event.SchemaID
 		// CCloud requires subject-level IMPORT mode
-		_ = r.cfg.TargetClient.SetSubjectMode(event.Subject, "IMPORT")
+		if err := r.cfg.TargetClient.SetSubjectMode(event.Subject, "IMPORT"); err != nil {
+			output.Warning("Failed to set IMPORT mode for %s: %v", event.Subject, err)
+			return fmt.Errorf("failed to set IMPORT mode for %s: %w", event.Subject, err)
+		}
 	}
 
 	_, err := r.cfg.TargetClient.RegisterSchema(event.Subject, schema)
@@ -379,7 +382,9 @@ func (r *Replicator) applySchemaEvent(event *kafka.SchemaEvent) error {
 
 	if r.cfg.PreserveIDs {
 		// Restore READWRITE mode for the subject
-		_ = r.cfg.TargetClient.SetSubjectMode(event.Subject, "READWRITE")
+		if err := r.cfg.TargetClient.SetSubjectMode(event.Subject, "READWRITE"); err != nil {
+			output.Warning("Failed to restore READWRITE mode for %s: %v", event.Subject, err)
+		}
 	}
 
 	r.stats.IncrSchemas()
@@ -464,7 +469,11 @@ func (r *Replicator) performInitialSync(ctx context.Context) error {
 		}
 
 		if r.cfg.PreserveIDs {
-			_ = target.SetSubjectMode(subj, "IMPORT")
+			if err := target.SetSubjectMode(subj, "IMPORT"); err != nil {
+				output.Warning("Failed to set IMPORT mode for %s, skipping: %v", subj, err)
+				r.stats.IncrErrors()
+				continue
+			}
 		}
 
 		for _, v := range versions {
@@ -495,7 +504,9 @@ func (r *Replicator) performInitialSync(ctx context.Context) error {
 		}
 
 		if r.cfg.PreserveIDs {
-			_ = target.SetSubjectMode(subj, "READWRITE")
+			if err := target.SetSubjectMode(subj, "READWRITE"); err != nil {
+				output.Warning("Failed to restore READWRITE mode for %s: %v", subj, err)
+			}
 		}
 	}
 

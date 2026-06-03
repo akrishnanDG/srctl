@@ -783,7 +783,7 @@ func checkAvroCompatibility(newContent, oldContent, mode string) []ValidationIss
 					Message:  fmt.Sprintf("Field '%s' was removed", fieldPath),
 					Fix:      fmt.Sprintf("Keep the field '%s', or change compatibility to NONE", fieldPath),
 				})
-			} else if oldField.Type != newField.Type {
+			} else if oldField.Type != newField.Type && !isAvroTypePromotion(oldField.Type, newField.Type) {
 				issues = append(issues, ValidationIssue{
 					Severity: "ERROR",
 					Field:    fieldPath,
@@ -820,7 +820,7 @@ func checkAvroCompatibility(newContent, oldContent, mode string) []ValidationIss
 					Message:  fmt.Sprintf("New field '%s' added (old consumers cannot read it)", fieldPath),
 					Fix:      fmt.Sprintf("Ensure old consumers can ignore unknown field '%s', or use BACKWARD compatibility", fieldPath),
 				})
-			} else if newField.Type != oldField.Type {
+			} else if newField.Type != oldField.Type && !isAvroTypePromotion(oldField.Type, newField.Type) {
 				// Already reported in BACKWARD section if FULL
 				if mode == "FORWARD" || mode == "FORWARD_TRANSITIVE" {
 					issues = append(issues, ValidationIssue{

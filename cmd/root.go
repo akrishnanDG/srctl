@@ -15,7 +15,7 @@ var (
 	username     string
 	password     string
 	registryName string
-	context      string
+	srContext    string
 	outputFormat string
 
 	rootCmd = &cobra.Command{
@@ -29,7 +29,7 @@ Configure your registries in ~/.srctl/srctl.yaml or use environment variables:
 
 For large registries with many subjects, increase --workers for faster operations.
 See 'srctl [command] --help' for command-specific options.`,
-		Version: "1.0.0",
+		Version: "dev",
 	}
 )
 
@@ -59,7 +59,7 @@ func init() {
 	rootCmd.PersistentFlags().StringVar(&username, "username", "", "Basic auth username")
 	rootCmd.PersistentFlags().StringVar(&password, "password", "", "Basic auth password")
 	rootCmd.PersistentFlags().StringVarP(&registryName, "registry", "r", "", "Registry name from config")
-	rootCmd.PersistentFlags().StringVarP(&context, "context", "c", "", "Schema Registry context (e.g., '.mycontext')")
+	rootCmd.PersistentFlags().StringVarP(&srContext, "context", "c", "", "Schema Registry context (e.g., '.mycontext')")
 	rootCmd.PersistentFlags().StringVarP(&outputFormat, "output", "o", "table", "Output format: table, json, yaml, plain")
 }
 
@@ -68,6 +68,11 @@ func initConfig() {
 		// Only warn for actual config errors, not missing config files
 		fmt.Fprintf(os.Stderr, "Warning: %v\n", err)
 	}
+}
+
+// SetVersionInfo sets version information from build-time ldflags
+func SetVersionInfo(version, commit, date string) {
+	rootCmd.Version = fmt.Sprintf("%s (commit: %s, built: %s)", version, commit, date)
 }
 
 // Execute runs the root command
@@ -107,15 +112,12 @@ func GetClient() (*client.SchemaRegistryClient, error) {
 			// Try environment variables
 			url = os.Getenv("SCHEMA_REGISTRY_URL")
 			if authInfo := os.Getenv("SCHEMA_REGISTRY_BASIC_AUTH_USER_INFO"); authInfo != "" {
-				// Format: user:password
-				if idx := len(authInfo) - len(authInfo); idx >= 0 {
-					// Simple split on first colon
-					for i, c := range authInfo {
-						if c == ':' {
-							user = authInfo[:i]
-							pass = authInfo[i+1:]
-							break
-						}
+				// Format: user:password — split on first colon
+				for i, c := range authInfo {
+					if c == ':' {
+						user = authInfo[:i]
+						pass = authInfo[i+1:]
+						break
 					}
 				}
 			}
@@ -131,8 +133,8 @@ func GetClient() (*client.SchemaRegistryClient, error) {
 	}
 
 	// Context flag overrides config
-	if context != "" {
-		ctx = context
+	if srContext != "" {
+		ctx = srContext
 	}
 
 	if url == "" {
@@ -153,6 +155,14 @@ func GetClient() (*client.SchemaRegistryClient, error) {
 	}
 
 	return c, nil
+}
+
+// clampWorkers ensures worker count is at least 1 to prevent deadlocks
+func clampWorkers(n int) int {
+	if n < 1 {
+		return 1
+	}
+	return n
 }
 
 // GetClientForRegistry returns a client for a specific registry by name

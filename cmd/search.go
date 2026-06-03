@@ -8,7 +8,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"sync/atomic"
+
 
 	"github.com/schollz/progressbar/v3"
 	"github.com/spf13/cobra"
@@ -187,10 +187,10 @@ func runSearch(cmd *cobra.Command, args []string) error {
 }
 
 func searchSubjectsParallel(c *client.SchemaRegistryClient, subjects []string, numWorkers int) []SearchResult {
+	numWorkers = clampWorkers(numWorkers)
 	jobs := make(chan string, len(subjects))
 	results := make(chan []SearchResult, len(subjects))
 
-	var completed int64
 	bar := progressbar.NewOptions(len(subjects),
 		progressbar.OptionSetDescription("Searching"),
 		progressbar.OptionShowCount(),
@@ -206,7 +206,6 @@ func searchSubjectsParallel(c *client.SchemaRegistryClient, subjects []string, n
 			for subject := range jobs {
 				subjectResults := searchSubject(c, subject)
 				results <- subjectResults
-				atomic.AddInt64(&completed, 1)
 				bar.Add(1)
 			}
 		}()

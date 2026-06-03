@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/tls"
 	"fmt"
+	"os"
 
 	"github.com/twmb/franz-go/pkg/kgo"
 	"github.com/twmb/franz-go/pkg/sasl/plain"
@@ -72,6 +73,9 @@ func NewConsumer(cfg ConsumerConfig) (*Consumer, error) {
 
 	// TLS
 	if cfg.TLSEnabled {
+		if cfg.TLSSkipVerify {
+			fmt.Fprintln(os.Stderr, "WARNING: TLS certificate verification is disabled — connection is vulnerable to MITM attacks")
+		}
 		tlsCfg := &tls.Config{
 			InsecureSkipVerify: cfg.TLSSkipVerify, // #nosec G402 -- user-controlled flag
 		}
@@ -93,15 +97,17 @@ func NewConsumer(cfg ConsumerConfig) (*Consumer, error) {
 // Blocks until records are available or the context is cancelled.
 func (c *Consumer) Poll(ctx context.Context) ([]*kgo.Record, error) {
 	fetches := c.client.PollFetches(ctx)
+	records := fetches.Records()
+
 	if errs := fetches.Errors(); len(errs) > 0 {
-		// Return the first error; fetches may still contain records
+		// Return records alongside the error so callers can process partial results
 		for _, e := range errs {
 			if e.Err != nil {
-				return nil, fmt.Errorf("fetch error on %s[%d]: %w", e.Topic, e.Partition, e.Err)
+				return records, fmt.Errorf("fetch error on %s[%d]: %w", e.Topic, e.Partition, e.Err)
 			}
 		}
 	}
-	return fetches.Records(), nil
+	return records, nil
 }
 
 // CommitOffsets commits the current consumer group offsets.

@@ -6,6 +6,7 @@ import (
 	"compress/gzip"
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -197,6 +198,7 @@ func runExport(cmd *cobra.Command, args []string) error {
 
 // collectExportSchemasParallel fetches schemas from multiple subjects in parallel for export
 func collectExportSchemasParallel(c *client.SchemaRegistryClient, subjects []string, numWorkers int, versionsFilter string, includeDeleted bool) []schemaExport {
+	numWorkers = clampWorkers(numWorkers)
 	type job struct {
 		subject string
 	}
@@ -326,14 +328,29 @@ func exportToDirectory(schemas []schemaExport, outputPath string) error {
 		progressbar.OptionClearOnFinish(),
 	)
 
-	ctx := context
+	ctx := srContext
 	if ctx == "" {
 		ctx = "default"
 	}
 
+	absOutput, err := filepath.Abs(outputPath)
+	if err != nil {
+		return fmt.Errorf("failed to resolve output path: %w", err)
+	}
+
 	for _, s := range schemas {
-		// Create directory structure
-		dir := filepath.Join(outputPath, ctx, s.Subject)
+		// Sanitize subject name to prevent path traversal
+		safeSubject := url.PathEscape(s.Subject)
+		dir := filepath.Join(absOutput, ctx, safeSubject)
+
+		// Verify the resolved path is still under the output directory
+		absDir, err := filepath.Abs(dir)
+		if err != nil || !strings.HasPrefix(absDir, absOutput+string(filepath.Separator)) {
+			output.Warning("Skipping subject with unsafe name: %s", s.Subject)
+			bar.Add(1)
+			continue
+		}
+
 		if err := os.MkdirAll(dir, 0755); err != nil {
 			return fmt.Errorf("failed to create directory: %w", err)
 		}
@@ -353,7 +370,7 @@ func exportToDirectory(schemas []schemaExport, outputPath string) error {
 				}
 			}
 		}
-		if err := os.WriteFile(schemaPath, []byte(schemaContent), 0644); err != nil {
+		if err := os.WriteFile(schemaPath, []byte(schemaContent), 0600); err != nil {
 			return fmt.Errorf("failed to write schema: %w", err)
 		}
 
@@ -371,7 +388,7 @@ func exportToDirectory(schemas []schemaExport, outputPath string) error {
 
 		metadataPath := filepath.Join(dir, fmt.Sprintf("v%d.metadata.json", s.Version))
 		metadataBytes, _ := json.MarshalIndent(metadata, "", "  ")
-		os.WriteFile(metadataPath, metadataBytes, 0644)
+		os.WriteFile(metadataPath, metadataBytes, 0600)
 
 		bar.Add(1)
 	}
@@ -406,16 +423,17 @@ func exportToTar(schemas []schemaExport, outputPath string) error {
 		progressbar.OptionClearOnFinish(),
 	)
 
-	ctx := context
+	ctx := srContext
 	if ctx == "" {
 		ctx = "default"
 	}
 
 	for _, s := range schemas {
+		safeSubject := url.PathEscape(s.Subject)
 		ext := getSchemaExtension(s.SchemaType)
 
 		// Schema file
-		schemaPath := filepath.Join(ctx, s.Subject, fmt.Sprintf("v%d.%s", s.Version, ext))
+		schemaPath := filepath.Join(ctx, safeSubject, fmt.Sprintf("v%d.%s", s.Version, ext))
 		schemaContent := s.Schema
 		if s.SchemaType == "AVRO" {
 			var parsed interface{}
@@ -442,7 +460,7 @@ func exportToTar(schemas []schemaExport, outputPath string) error {
 			metadata["references"] = s.References
 		}
 		metadataBytes, _ := json.MarshalIndent(metadata, "", "  ")
-		metadataPath := filepath.Join(ctx, s.Subject, fmt.Sprintf("v%d.metadata.json", s.Version))
+		metadataPath := filepath.Join(ctx, safeSubject, fmt.Sprintf("v%d.metadata.json", s.Version))
 		if err := addToTar(tarWriter, metadataPath, metadataBytes); err != nil {
 			return err
 		}
@@ -493,16 +511,17 @@ func exportToZip(schemas []schemaExport, outputPath string) error {
 		progressbar.OptionClearOnFinish(),
 	)
 
-	ctx := context
+	ctx := srContext
 	if ctx == "" {
 		ctx = "default"
 	}
 
 	for _, s := range schemas {
+		safeSubject := url.PathEscape(s.Subject)
 		ext := getSchemaExtension(s.SchemaType)
 
 		// Schema file
-		schemaPath := filepath.Join(ctx, s.Subject, fmt.Sprintf("v%d.%s", s.Version, ext))
+		schemaPath := filepath.Join(ctx, safeSubject, fmt.Sprintf("v%d.%s", s.Version, ext))
 		schemaContent := s.Schema
 		if s.SchemaType == "AVRO" {
 			var parsed interface{}
@@ -533,7 +552,7 @@ func exportToZip(schemas []schemaExport, outputPath string) error {
 			metadata["references"] = s.References
 		}
 		metadataBytes, _ := json.MarshalIndent(metadata, "", "  ")
-		metadataPath := filepath.Join(ctx, s.Subject, fmt.Sprintf("v%d.metadata.json", s.Version))
+		metadataPath := filepath.Join(ctx, safeSubject, fmt.Sprintf("v%d.metadata.json", s.Version))
 
 		w, err = zipWriter.Create(metadataPath)
 		if err != nil {

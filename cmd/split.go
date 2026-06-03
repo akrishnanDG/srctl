@@ -6,16 +6,12 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
-	"sort"
 	"strings"
 
 	"github.com/spf13/cobra"
 	"github.com/srctl/srctl/internal/client"
 	"github.com/srctl/srctl/internal/output"
 )
-
-// Command group for schema splitting
-const groupSplit = "split"
 
 // splitCmd is the parent command for schema splitting operations
 var splitCmd = &cobra.Command{
@@ -1150,62 +1146,6 @@ func replaceAvroInlineTypes(fieldType interface{}, namespace string, extracted m
 	}
 }
 
-// rebuildAvroSchemaSelective walks a schema and only replaces inline record/enum/fixed
-// types that exist in the keepTypes map. All other inline types are left as-is.
-func rebuildAvroSchemaSelective(schema map[string]interface{}, keepTypes map[string]map[string]interface{}) {
-	if fields, ok := schema["fields"].([]interface{}); ok {
-		for i, f := range fields {
-			field, ok := f.(map[string]interface{})
-			if !ok {
-				continue
-			}
-			field["type"] = replaceAvroSelectiveTypes(field["type"], schema["namespace"], keepTypes)
-			fields[i] = field
-		}
-	}
-}
-
-func replaceAvroSelectiveTypes(fieldType interface{}, parentNS interface{}, keepTypes map[string]map[string]interface{}) interface{} {
-	ns, _ := parentNS.(string)
-	switch ft := fieldType.(type) {
-	case map[string]interface{}:
-		typeName, _ := ft["type"].(string)
-		switch typeName {
-		case "record", "enum", "fixed":
-			fullName := getAvroFullName(ft)
-			if _, keep := keepTypes[fullName]; keep {
-				// This type should be extracted — will be handled by extractAvroNamedTypes
-				return ft
-			}
-			// Not in keep set — recurse into its fields but leave inline
-			if typeName == "record" {
-				rebuildAvroSchemaSelective(ft, keepTypes)
-			}
-			return ft
-		case "array":
-			if items, ok := ft["items"]; ok {
-				ft["items"] = replaceAvroSelectiveTypes(items, parentNS, keepTypes)
-			}
-			return ft
-		case "map":
-			if values, ok := ft["values"]; ok {
-				ft["values"] = replaceAvroSelectiveTypes(values, ns, keepTypes)
-			}
-			return ft
-		default:
-			return ft
-		}
-	case []interface{}:
-		result := make([]interface{}, 0, len(ft))
-		for _, ut := range ft {
-			result = append(result, replaceAvroSelectiveTypes(ut, parentNS, keepTypes))
-		}
-		return result
-	default:
-		return ft
-	}
-}
-
 func buildAvroRootSchema(original map[string]interface{}, extracted map[string]map[string]interface{}, rootName string) map[string]interface{} {
 	if rootSchema, ok := extracted[rootName]; ok {
 		return rootSchema
@@ -1681,9 +1621,3 @@ func toSnakeCase(name string) string {
 	return strings.ToLower(result.String())
 }
 
-// sortTypesByDeps sorts types so dependencies come first
-func sortTypesByDeps(types []ExtractedType) {
-	sort.SliceStable(types, func(i, j int) bool {
-		return types[i].Order < types[j].Order
-	})
-}
