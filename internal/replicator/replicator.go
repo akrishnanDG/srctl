@@ -397,6 +397,18 @@ func (r *Replicator) applySchemaEvent(event *kafka.SchemaEvent) error {
 		schema.ID = event.SchemaID
 		// CCloud requires subject-level IMPORT mode
 		if err := r.cfg.TargetClient.SetSubjectMode(event.Subject, "IMPORT"); err != nil {
+			// Idempotency: if IMPORT mode can't be set because the subject already
+			// exists / has existing subjects (e.g. HTTP initial sync already
+			// replicated this, or replication was restarted against a populated
+			// target), this is only a real failure if the schema is NOT already
+			// present. If the schema is already present on the target, treat the
+			// event as a successfully-applied no-op so offset progress isn't
+			// blocked. Otherwise it's a genuine error we must not silently drop.
+			if isExistingSubjectsImportError(err) && r.schemaAlreadyPresent(event) {
+				output.Info("Skipping %s v%d: schema already present on target (import mode unavailable)",
+					event.Subject, event.Version)
+				return nil
+			}
 			output.Warning("Failed to set IMPORT mode for %s: %v", event.Subject, err)
 			return fmt.Errorf("failed to set IMPORT mode for %s: %w", event.Subject, err)
 		}
@@ -618,6 +630,57 @@ func isAlreadyExistsError(err error) bool {
 	msg := err.Error()
 	return strings.Contains(msg, "already exists") ||
 		strings.Contains(msg, "already registered")
+}
+
+// isExistingSubjectsImportError reports whether the error indicates the target
+// could not be put into IMPORT mode because it already has existing subjects
+// (SR error code 42205 / "found existing subjects"). This happens when the
+// HTTP initial sync already populated the target, or when replication is
+// restarted against an already-populated target.
+func isExistingSubjectsImportError(err error) bool {
+	msg := err.Error()
+	return strings.Contains(msg, "found existing subjects") ||
+		strings.Contains(msg, "42205")
+}
+
+// schemaAlreadyPresent reports whether the schema in the event is already
+// registered on the target for its subject. It first tries to match by the
+// preserved schema ID (the source ID we want on the target), then falls back
+// to matching the exact schema content across the subject's versions. A true
+// result means re-applying the event would be a no-op, so the event can be
+// safely treated as already applied.
+func (r *Replicator) schemaAlreadyPresent(event *kafka.SchemaEvent) bool {
+	if event.Subject == "" {
+		return false
+	}
+
+	// Fast path: if a schema with the preserved ID exists and maps to this
+	// subject, it's already present.
+	if event.SchemaID != 0 {
+		if sv, err := r.cfg.TargetClient.GetSchemaSubjectVersionsByID(event.SchemaID); err == nil {
+			for _, m := range sv {
+				if m.Subject == event.Subject {
+					return true
+				}
+			}
+		}
+	}
+
+	// Fallback: compare exact schema content across the subject's versions.
+	versions, err := r.cfg.TargetClient.GetVersions(event.Subject, false)
+	if err != nil {
+		return false
+	}
+	for _, v := range versions {
+		s, err := r.cfg.TargetClient.GetSchema(event.Subject, strconv.Itoa(v))
+		if err != nil {
+			continue
+		}
+		if s.Schema == event.Schema {
+			return true
+		}
+	}
+	return false
 }
 
 // filterSubjects filters subjects by a glob pattern. SR subjects are
