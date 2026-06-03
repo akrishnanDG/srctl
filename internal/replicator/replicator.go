@@ -38,8 +38,8 @@ type Stats struct {
 	Errors            int64
 	LastOffset        int64
 	LastEventTime     time.Time
-	EventsProcessed  int64
-	EventsFiltered   int64
+	EventsProcessed   int64
+	EventsFiltered    int64
 }
 
 // StatsSnapshot is a point-in-time copy of stats.
@@ -50,8 +50,8 @@ type StatsSnapshot struct {
 	DeletesReplicated int64
 	ModesReplicated   int64
 	Errors            int64
-	EventsProcessed  int64
-	EventsFiltered   int64
+	EventsProcessed   int64
+	EventsFiltered    int64
 	LastOffset        int64
 	LastEventTime     time.Time
 }
@@ -121,8 +121,8 @@ func (s *Stats) Snapshot() StatsSnapshot {
 		DeletesReplicated: s.DeletesReplicated,
 		ModesReplicated:   s.ModesReplicated,
 		Errors:            s.Errors,
-		EventsProcessed:  s.EventsProcessed,
-		EventsFiltered:   s.EventsFiltered,
+		EventsProcessed:   s.EventsProcessed,
+		EventsFiltered:    s.EventsFiltered,
 		LastOffset:        s.LastOffset,
 		LastEventTime:     s.LastEventTime,
 	}

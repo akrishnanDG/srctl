@@ -68,17 +68,17 @@ type SchemaRuleSet struct {
 
 // SchemaRule represents a single data contract rule
 type SchemaRule struct {
-	Name     string            `json:"name,omitempty"`
-	Doc      string            `json:"doc,omitempty"`
-	Kind     string            `json:"kind,omitempty"`
-	Mode     string            `json:"mode,omitempty"`
-	Type     string            `json:"type,omitempty"`
-	Tags     []string          `json:"tags,omitempty"`
-	Params   map[string]string `json:"params,omitempty"`
-	Expr     string            `json:"expr,omitempty"`
-	OnSuccess string           `json:"onSuccess,omitempty"`
-	OnFailure string           `json:"onFailure,omitempty"`
-	Disabled bool              `json:"disabled,omitempty"`
+	Name      string            `json:"name,omitempty"`
+	Doc       string            `json:"doc,omitempty"`
+	Kind      string            `json:"kind,omitempty"`
+	Mode      string            `json:"mode,omitempty"`
+	Type      string            `json:"type,omitempty"`
+	Tags      []string          `json:"tags,omitempty"`
+	Params    map[string]string `json:"params,omitempty"`
+	Expr      string            `json:"expr,omitempty"`
+	OnSuccess string            `json:"onSuccess,omitempty"`
+	OnFailure string            `json:"onFailure,omitempty"`
+	Disabled  bool              `json:"disabled,omitempty"`
 }
 
 // SchemaReference represents a reference to another schema

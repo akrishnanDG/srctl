@@ -9,7 +9,6 @@ import (
 	"strings"
 	"sync"
 
-
 	"github.com/schollz/progressbar/v3"
 	"github.com/spf13/cobra"
 	"github.com/srctl/srctl/internal/client"
