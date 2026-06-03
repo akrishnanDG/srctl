@@ -31,6 +31,13 @@ Configure your registries in ~/.srctl/srctl.yaml or use environment variables:
 For large registries with many subjects, increase --workers for faster operations.
 See 'srctl [command] --help' for command-specific options.`,
 		Version: "dev",
+		// Suppress the usage/flags dump only once flag/argument parsing has
+		// succeeded, so runtime errors returned by RunE don't trigger it.
+		// Genuine flag/arg parse errors still show usage because they occur
+		// before this hook runs. Propagates to subcommands.
+		PersistentPreRun: func(cmd *cobra.Command, args []string) {
+			cmd.SilenceUsage = true
+		},
 	}
 )
 
