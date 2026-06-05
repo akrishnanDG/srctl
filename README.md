@@ -275,7 +275,23 @@ srctl delete user-events --skip-ref-check
 
 ### Clone Operations
 
-Clone schemas between registries with **schema ID preservation** (default):
+Clone schemas between registries with **schema ID preservation** (default).
+
+> **`--source` and `--target` are registry *names* from your config, not URLs.**
+> Define each registry once under `registries:` in `srctl.yaml` (see
+> [Configuration](#configuration)) and reference it by `name`. Passing a URL
+> directly (e.g. `--source http://...`) fails with `registry '...' not found in
+> config`. The two names below assume this config:
+>
+> ```yaml
+> registries:
+>   - name: dev
+>     url: http://sr.dev.internal:8081
+>   - name: prod
+>     url: https://psrc-xxxxx.us-east-2.aws.confluent.cloud
+>     username: PROD_API_KEY
+>     password: PROD_API_SECRET
+> ```
 
 ```bash
 # Clone all schemas (preserves schema IDs by default)
@@ -297,7 +313,48 @@ srctl clone --source dev --target prod --configs --tags
 srctl clone --source dev --target prod --dry-run
 ```
 
-**Note:** Schema ID preservation requires the target registry to be set to IMPORT mode. The clone command handles this automatically.
+**Note:** Schema ID preservation requires the **target** registry to permit
+IMPORT mode — the target credentials must be allowed to set registry mode (and
+mode mutability must be enabled, e.g. on Confluent Cloud). clone sets and
+restores the mode automatically: global IMPORT for an empty target, or
+per-subject IMPORT (then restore to `READWRITE`) when the target already
+contains subjects. If your target can't use IMPORT mode, clone with
+`--no-preserve-ids` instead.
+
+#### One-time migration (step by step)
+
+To migrate an entire registry once — e.g. on-prem/Community → Confluent Cloud —
+define both registries in `srctl.yaml` and run:
+
+```bash
+# 1. Confirm both endpoints are reachable and see how much you're moving
+srctl health --registry on-prem
+srctl health --registry ccloud
+srctl stats  --registry on-prem
+
+# 2. Preview the migration — no changes are written
+srctl clone --source on-prem --target ccloud --tags --dry-run
+
+# 3. Run the migration (preserves IDs by default; copies configs + tags)
+srctl clone --source on-prem --target ccloud --tags --workers 20
+
+# 4. Re-run safely if interrupted (idempotent top-up)
+srctl clone --source on-prem --target ccloud --tags --skip-existing
+
+# 5. Verify parity between source and target
+srctl compare --source on-prem --target ccloud
+```
+
+Migrate between **contexts** with `--source-context` / `--target-context`:
+
+```bash
+srctl clone --source on-prem --target ccloud \
+  --source-context .prod --target-context .prod --tags
+```
+
+References are resolved automatically (referenced schemas are cloned before
+their dependents). For a *continuous* (not one-time) migration that keeps the
+target in sync, use [`srctl replicate`](docs/continuous-replication-guide.md).
 
 ### Export & Import
 
