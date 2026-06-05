@@ -109,9 +109,9 @@ srctl get test-replication-value --registry ccloud
 
 ### Initial sync
 
-On first run, the replicator performs a full clone of all schemas from source to target via the REST API (same logic as `srctl clone`). This ensures the target is fully caught up before streaming begins.
+On first run, the replicator performs a full clone of all schemas from source to target via the REST API (same logic as `srctl clone`). This ensures the target is fully caught up before streaming begins. Because the initial sync already captures the current state, streaming then starts from the **end** of the `_schemas` topic (new changes only) -- it does *not* replay the topic's history.
 
-Skip this on subsequent runs with `--no-initial-sync` -- the consumer group remembers where it left off.
+Skip the initial sync with `--no-initial-sync` (see [Consumer groups and resumability](#consumer-groups-and-resumability) for exactly where streaming starts in that case).
 
 ### Streaming replication
 
@@ -121,7 +121,7 @@ After the initial sync, the replicator enters streaming mode:
 2. **Parse** -- Decode each record's key/value into a typed event (SCHEMA, CONFIG, MODE, DELETE_SUBJECT)
 3. **Filter** -- Skip events that don't match the `--filter` glob pattern
 4. **Apply** -- Execute the corresponding REST API call on the target
-5. **Commit** -- Commit consumer group offsets (only if the entire batch succeeded)
+5. **Commit** -- Commit the offset up to the last *successfully-applied* record in the batch (see [Offset safety](#offset-safety))
 
 ### Event types replicated
 
@@ -141,17 +141,21 @@ By default, schema IDs are preserved using IMPORT mode on the target. This ensur
 
 ### Consumer groups and resumability
 
-The replicator uses a Kafka consumer group (default: `srctl-replicate-<source>-<target>`) to track its position. On restart:
+The replicator uses a Kafka consumer group (default: `srctl-replicate-<source>-<target>`) to track its position.
 
-- The consumer resumes from the last committed offset
-- Use `--no-initial-sync` to skip the full clone (since the target is already caught up)
-- Use `--group-id` to run multiple independent replication streams
+**Where streaming starts** depends on whether the consumer group already has a committed offset:
+
+- **Group has a committed offset** (a restart) -- resumes from exactly there, regardless of `--no-initial-sync`. This is the normal restart path.
+- **Fresh group, with initial sync** (the default first run) -- starts from the **end** of `_schemas`; the REST initial sync already populated the target, so only new changes are streamed.
+- **Fresh group, with `--no-initial-sync`** -- starts from the **beginning** of `_schemas` and replays the full history to build the target from Kafka alone (no REST initial sync).
+
+So `--no-initial-sync` serves two purposes: skipping the redundant full clone on a **restart**, or bootstrapping a target purely from **Kafka history**. Use `--group-id` to run multiple independent replication streams.
 
 ```bash
-# First run (full sync + streaming)
+# First run (REST full sync, then stream new changes from the end)
 srctl replicate --source on-prem --target ccloud
 
-# After restart (resume from last offset)
+# After restart (resume from last committed offset; skip redundant clone)
 srctl replicate --source on-prem --target ccloud --no-initial-sync
 ```
 
@@ -161,17 +165,20 @@ srctl replicate --source on-prem --target ccloud --no-initial-sync
 
 Each event is retried up to 10 times with exponential backoff (1s, 2s, 4s, ... capped at 30s). This covers roughly 5 minutes of retries per event before giving up.
 
-- **Retryable errors** (network timeouts, connection refused, 5xx server errors) -- retried with backoff
-- **Non-retryable errors** (400 bad request, 422 incompatible schema) -- fail immediately
-- **Idempotent** -- "already exists" / "already registered" responses are treated as success
+- **Retryable errors** (network timeouts, connection refused, 5xx server errors) -- retried with backoff. An unresolved-**reference** error (HTTP 422 where a referenced schema isn't on the target *yet*) is also retried, so a dependent schema can succeed once its reference lands.
+- **Non-retryable errors** (400 bad request, genuine 409/422 incompatibility) -- fail immediately
+- **Idempotent** -- already-applied events are treated as success and do not count as errors: "already exists" / "already registered" on register, and the "found existing subjects" case on IMPORT when the schema is already present on the target (e.g. after an initial sync, or when re-running against a populated target)
 
 ### Offset safety
 
-Offsets are committed only when the entire batch succeeds. If any event in a batch fails after exhausting retries:
+The replicator commits the offset only up to the **last successfully-applied record**, never past a record it failed to apply. Within a batch, events are applied in order; on the first event that fails after exhausting retries:
 
 - The error is logged
-- Offsets are **not** committed
-- On restart, uncommitted events are replayed from the last committed offset
+- The offset is committed up to (and including) the last event that *did* apply -- so successful work isn't reprocessed
+- Processing stops at the failed event; its offset and everything after it stay **uncommitted**
+- On restart, the consumer resumes from that first unapplied event -- nothing successfully applied is replayed, and nothing failed is silently skipped
+
+This guarantees a failing event can never be "committed over" by a later success, so no change is lost.
 
 ### Kafka consumer resilience
 
@@ -184,10 +191,10 @@ Offsets are committed only when the entire batch succeeds. If any event in a bat
 | Scenario | Behavior |
 |---|---|
 | Target SR down for 2 minutes | Events retry with backoff, recover automatically, no data loss |
-| Target SR down for 30+ minutes | Events exhaust retries, errors logged, offsets not committed. On restart, events are replayed |
+| Target SR down for 30+ minutes | Events exhaust retries, errors logged. The committed offset halts at the first unapplied event; on restart, replay resumes from there |
 | Kafka broker down | franz-go reconnects automatically. Poll errors retry with backoff |
 | Network partition (intermittent) | Individual requests retry with backoff, recover when connectivity restores |
-| Incompatible schema on target | Fails immediately (non-retryable), logged as error, other events continue |
+| Incompatible schema on target | Fails immediately (non-retryable), logged as error. The committed offset halts at that event (so it's retried on each restart); later events continue streaming live |
 
 ## Monitoring
 
@@ -223,7 +230,7 @@ Replication Stopped
 
 ### Prometheus metrics
 
-Enable with `--metrics-port <port>`. Metrics are available at `http://localhost:<port>/metrics`.
+Enable with `--metrics-port <port>`. Metrics are served on **loopback only** at `http://127.0.0.1:<port>/metrics`. For a Prometheus running on another host, scrape it via a local exporter sidecar, an SSH tunnel, or a port-forward (e.g. in Kubernetes) rather than exposing the port directly.
 
 ```bash
 srctl replicate --source on-prem --target ccloud --metrics-port 9090
